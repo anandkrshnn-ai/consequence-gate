@@ -52,13 +52,17 @@ pipeline.
   and recursive `ON DELETE CASCADE` graph walking.
 - `consequence_gate.core` -- shared models, the confidence/threshold
   evaluator, and the idempotency-locked circuit breaker.
-- `consequence_gate.integrations` -- stubs for MCP, Strands, and
-  LangGraph wiring (not yet implemented -- contributions welcome).
+- `consequence_gate.integrations.strands_hook` -- **implemented**: AWS Strands
+  `BeforeToolCallEvent` adapter with `ALLOW`/`DENY`/`ASK`/`STEER` handling.
+- `consequence_gate.integrations.mcp_proxy` -- stub (MCP JSON-RPC wiring pending).
+- `consequence_gate.integrations.langgraph_hook` -- stub (LangGraph node pending).
 - `consequence_gate.backtest` -- offline JSONL trace replay harness and
   four-quadrant FP/FN/TN report generator, for evaluating this layer
   against historical execution logs with zero production integration.
 
 ## Quickstart
+
+### Installation
 
 ```bash
 pip install -e ".[dev]"
@@ -66,11 +70,81 @@ pytest
 python examples/run_backtest_demo.py
 ```
 
+### AWS Strands Integration
+
+```python
+from consequence_gate.integrations.strands_hook import create_financial_gate_hook
+from strands.agents import Agent
+
+# Create a financial gate hook with your policy thresholds
+hook = create_financial_gate_hook(
+    daily_tier_limit_inr=25000.0,
+    instant_wire_threshold=10000.0,
+    max_retries=2,
+    context_provider=lambda event: {
+        "account_rolling_24h_spend": get_current_spend(event),  # your impl
+        "kyc_verified": is_kyc_verified(event),                 # your impl
+    },
+)
+
+# Attach to your Strands agent
+agent = Agent(hooks=[hook])
+
+# Now every tool call is intercepted:
+# - ALLOW: executes normally
+# - DENY: blocked with error message
+# - ASK: blocked, requires human approval
+# - STEER: blocked with guidance toward safer alternative
+response = agent("Process this claim for 50,000 INR")
+```
+
+### Database Deletion Gate (Strands)
+
+```python
+from consequence_gate.integrations.strands_hook import create_database_gate_hook
+
+hook = create_database_gate_hook(
+    max_autonomous_delete_rows=100,
+    db_conn=get_db_connection(),  # your DB connection
+    max_retries=2,
+    context_provider=lambda event: {
+        "table_metadata": get_table_metadata(event),  # your impl
+    },
+)
+
+agent = Agent(hooks=[hook])
+```
+
+## Decision Matrix
+
+| Decision | Agent sees | Use case |
+|----------|------------|----------|
+| `ALLOW` | Tool executes normally | Projected outcome within safe bounds |
+| `DENY` | `BLOCKED: <reason>` | Critical breach (e.g., 10x over threshold + irreversible) |
+| `ASK` | `ESCALATION_REQUIRED: <reason>` | Low confidence, or moderate breach requiring human review |
+| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative: <tool> with args <args>` | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete) |
+
+## Backtest Workflow
+
+Before deploying to production, run an offline backtest against historical
+execution traces:
+
+1. Export 1,000-5,000 tool-call traces as JSONL (see `examples/backtest_sample_traces.jsonl`)
+2. Run `python examples/run_backtest_demo.py` against your traces
+3. Review the four-quadrant breakdown:
+   - True Negative: correctly allowed benign operations
+   - False Negative Caught: schema-valid calls that would have breached limits
+   - False Positive Relieved: over-blocking that the simulator would have avoided
+   - Steer Recovery Rate: percentage of blocked turns that could have completed via guidance
+
 ## Status
 
-Early-stage. Financial and database simulators are functional with unit
-tests. Framework integrations (MCP, Strands, LangGraph) are stubs pending
-real wiring. Communications-domain simulator not yet started.
+- **Financial simulator**: functional with unit tests
+- **Database simulator**: functional with unit tests (EXPLAIN-based row estimation, recursive FK cascade walk)
+- **Strands integration**: functional with unit tests (full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle)
+- **MCP integration**: stub pending JSON-RPC wiring
+- **LangGraph integration**: stub pending node implementation
+- **Communications simulator**: not yet started
 
 ## License
 
