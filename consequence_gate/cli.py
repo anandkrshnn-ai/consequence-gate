@@ -19,8 +19,8 @@ from .core.circuit_breaker import SteerCircuitBreaker
 from .simulators.financial import FinancialDeltaPredictor
 
 
-def default_evaluator(trace: dict) -> str:
-    """Heuristic multi-domain evaluator for CLI backtesting across financial, DB, and comms tools."""
+def demo_evaluator(trace: dict) -> str:
+    """Heuristic multi-domain demo evaluator calibrated for sample benchmark traces."""
     tool = trace.get("tool_name", "")
     args = trace.get("tool_args", {})
     ctx = trace.get("session_context", {})
@@ -58,6 +58,10 @@ def default_evaluator(trace: dict) -> str:
     return "ALLOW"
 
 
+# Backwards compatibility alias
+default_evaluator = demo_evaluator
+
+
 
 def cmd_backtest(args):
     """Run backtest on historical traces."""
@@ -72,12 +76,16 @@ def cmd_backtest(args):
         print(f"Error loading traces: {e}", file=sys.stderr)
         sys.exit(1)
 
-    results = run_backtest(traces, default_evaluator)
+    results = run_backtest(traces, demo_evaluator)
     report = generate_report(results)
 
     if getattr(args, "json", False):
-        print(json.dumps(report, indent=2))
+        report_with_meta = {"evaluator": "demo_evaluator (synthetic benchmark heuristic)", **report}
+        print(json.dumps(report_with_meta, indent=2))
     else:
+        print()
+        print("[!] NOTICE: Running with built-in demo_evaluator (synthetic trace heuristic).")
+        print("    For production evaluation, pass domain simulator instances. See BACKTEST_RESULTS.md.")
         print()
         print("================ CONSEQUENCE GATE BACKTEST REPORT ================")
         print(f"Total Traces Evaluated:      {report['total_traces']}")

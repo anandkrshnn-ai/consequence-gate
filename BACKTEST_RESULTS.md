@@ -61,6 +61,9 @@ consequence-gate backtest examples/benchmark_traces.jsonl --json
 ### CLI Output
 
 ```text
+[!] NOTICE: Running with built-in demo_evaluator (synthetic trace heuristic).
+    For production evaluation, pass domain simulator instances. See BACKTEST_RESULTS.md.
+
 ================ CONSEQUENCE GATE BACKTEST REPORT ================
 Total Traces Evaluated:      500
 Benign Pass-Through (TN):    252

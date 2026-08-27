@@ -3,16 +3,18 @@ Unit tests for consequence_gate CLI entry point.
 """
 
 import json
-from consequence_gate.cli import default_evaluator, main
+from consequence_gate.cli import demo_evaluator, default_evaluator, main
 import pytest
 
 
-def test_default_evaluator():
-    assert default_evaluator({"tool_name": "delete_user", "tool_args": {}}) == "DENY"
-    assert default_evaluator({"tool_name": "drop_table", "tool_args": {}}) == "DENY"
-    assert default_evaluator({"tool_name": "transfer_funds", "tool_args": {"amount": 6000}}) == "ASK"
-    assert default_evaluator({"tool_name": "transfer_funds", "tool_args": {"amount": 1000}}) == "ALLOW"
-    assert default_evaluator({"tool_name": "get_user", "tool_args": {"id": 1}}) == "ALLOW"
+def test_demo_evaluator():
+    assert demo_evaluator({"tool_name": "delete_user", "tool_args": {}}) == "DENY"
+    assert demo_evaluator({"tool_name": "drop_table", "tool_args": {}}) == "DENY"
+    assert demo_evaluator({"tool_name": "transfer_funds", "tool_args": {"amount": 6000}}) == "ASK"
+    assert demo_evaluator({"tool_name": "transfer_funds", "tool_args": {"amount": 1000}}) == "ALLOW"
+    assert demo_evaluator({"tool_name": "get_user", "tool_args": {"id": 1}}) == "ALLOW"
+    # Backwards compatibility check
+    assert default_evaluator is demo_evaluator
 
 
 def test_cli_backtest(tmp_path, capsys, monkeypatch):
@@ -32,3 +34,4 @@ def test_cli_backtest(tmp_path, capsys, monkeypatch):
     assert report["total_traces"] == 2
     assert report["false_negative_caught"] == 1
     assert report["true_negative"] == 1
+    assert "demo_evaluator" in report["evaluator"]
