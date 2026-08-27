@@ -45,15 +45,17 @@ pipeline.
 
 ## Modules
 
-- `consequence_gate.simulators.financial` -- disbursement / claim / refund
+- `consequence_gate.simulators.financial` -- **functional**: disbursement / claim / refund
   velocity and irreversibility modeling.
-- `consequence_gate.simulators.database` -- row-count blast radius via the
+- `consequence_gate.simulators.database` -- **functional**: row-count blast radius via the
   DB's own query planner (`EXPLAIN`, not hardcoded selectivity constants)
   and recursive `ON DELETE CASCADE` graph walking.
+- `consequence_gate.simulators.communications` -- **functional**: outbound email/SMS/notification
+  blast radius, unsubscribe suppression compliance, canary cohort analysis, sender reputation impact.
 - `consequence_gate.core` -- shared models, the confidence/threshold
   evaluator, and the idempotency-locked circuit breaker.
-- `consequence_gate.integrations.strands_hook` -- **implemented**: AWS Strands
-  `BeforeToolCallEvent` adapter with `ALLOW`/`DENY`/`ASK`/`STEER` handling.
+- `consequence_gate.integrations.strands_hook` -- **functional**: AWS Strands
+  `BeforeToolCallEvent` adapter with full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle.
 - `consequence_gate.integrations.mcp_proxy` -- stub (MCP JSON-RPC wiring pending).
 - `consequence_gate.integrations.langgraph_hook` -- stub (LangGraph node pending).
 - `consequence_gate.backtest` -- offline JSONL trace replay harness and
@@ -82,8 +84,8 @@ hook = create_financial_gate_hook(
     instant_wire_threshold=10000.0,
     max_retries=2,
     context_provider=lambda event: {
-        "account_rolling_24h_spend": get_current_spend(event),  # your impl
-        "kyc_verified": is_kyc_verified(event),                 # your impl
+        "account_rolling_24h_spend": get_current_spend(event),
+        "kyc_verified": is_kyc_verified(event),
     },
 )
 
@@ -105,14 +107,39 @@ from consequence_gate.integrations.strands_hook import create_database_gate_hook
 
 hook = create_database_gate_hook(
     max_autonomous_delete_rows=100,
-    db_conn=get_db_connection(),  # your DB connection
+    db_conn=get_db_connection(),
     max_retries=2,
     context_provider=lambda event: {
-        "table_metadata": get_table_metadata(event),  # your impl
+        "table_metadata": get_table_metadata(event),
     },
 )
 
 agent = Agent(hooks=[hook])
+```
+
+### Communications Blast Gate (Strands)
+
+```python
+from consequence_gate.integrations.strands_hook import create_communication_gate_hook
+
+hook = create_communication_gate_hook(
+    max_autonomous_recipients=10000,
+    canary_min_size=100,
+    canary_max_bounce_rate=0.05,
+    canary_max_complaint_rate=0.01,
+    context_provider=lambda event: {
+        "segment_counts": get_segment_counts(event),
+        "recent_unsubscribes": get_recent_unsubscribes(event),
+        "historical_bounce_rate": 0.02,
+        "historical_complaint_rate": 0.005,
+    },
+)
+
+agent = Agent(hooks=[hook])
+
+# Blocks compliance violations (no unsubscribe suppression)
+# Steers high-volume sends to canary cohorts
+# Steers high-bounce canaries to list hygiene
 ```
 
 ## Decision Matrix
@@ -120,9 +147,9 @@ agent = Agent(hooks=[hook])
 | Decision | Agent sees | Use case |
 |----------|------------|----------|
 | `ALLOW` | Tool executes normally | Projected outcome within safe bounds |
-| `DENY` | `BLOCKED: <reason>` | Critical breach (e.g., 10x over threshold + irreversible) |
+| `DENY` | `BLOCKED: <reason>` | Critical breach (e.g., 10x over threshold + irreversible, compliance violation) |
 | `ASK` | `ESCALATION_REQUIRED: <reason>` | Low confidence, or moderate breach requiring human review |
-| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative: <tool> with args <args>` | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete) |
+| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative: <tool> with args <args>` | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete, canary cohort) |
 
 ## Backtest Workflow
 
@@ -141,10 +168,10 @@ execution traces:
 
 - **Financial simulator**: functional with unit tests
 - **Database simulator**: functional with unit tests (EXPLAIN-based row estimation, recursive FK cascade walk)
+- **Communications simulator**: functional with unit tests (blast radius, unsubscribe compliance, canary cohorts, reputation impact)
 - **Strands integration**: functional with unit tests (full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle)
 - **MCP integration**: stub pending JSON-RPC wiring
 - **LangGraph integration**: stub pending node implementation
-- **Communications simulator**: not yet started
 
 ## License
 
