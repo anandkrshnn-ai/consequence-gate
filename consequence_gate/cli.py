@@ -15,6 +15,7 @@ from .backtest.harness import load_traces, run_backtest
 from .backtest.reporter import generate_report
 from .simulators.financial import FinancialDeltaPredictor
 from .core.circuit_breaker import SteerCircuitBreaker
+from . import __version__
 
 
 def simulate_and_evaluate_factory():
@@ -51,36 +52,30 @@ def cmd_backtest(args):
     report = generate_report(results)
 
     print()
-    print("=== Backtest Report ===")
-    print(f"Total traces: {report['total_traces']}")
-    print(f"True negatives: {report['true_negative']}")
-    print(f"False negatives caught: {report['false_negative_caught']}")
-    print(f"False positives relieved: {report['false_positive_relieved']}")
-    print(f"False negative rate: {report['false_negative_rate']:.2%}")
-    print(f"False positive relief rate: {report['false_positive_relief_rate']:.2%}")
-
-
-def cmd_version(args):
-    """Print version."""
-    from . import __version__
-    print(f"consequence-gate {__version__}")
+    print("================ CONSEQUENCE GATE BACKTEST REPORT ================")
+    print(f"Total Traces Evaluated:      {report['total_traces']}")
+    print(f"True Negatives:              {report['true_negative']}")
+    print(f"False Negatives Caught:      {report['false_negative_caught']}")
+    print(f"False Positives Relieved:    {report['false_positive_relieved']}")
+    print(f"Other / Unclassified:        {report['other']}")
+    print("-" * 66)
+    print(f"False Negative Catch Rate:   {report['false_negative_rate']:.2%}")
+    print(f"False Positive Relief Rate:  {report['false_positive_relief_rate']:.2%}")
+    print("=" * 66)
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="consequence-gate",
-        description="Speculative outcome-simulation layer for AI agent tool calls",
+        description="Speculative outcome-simulation gate & trace backtesting for AI agent tool calls",
     )
+    parser.add_argument("-v", "--version", action="version", version=f"consequence-gate {__version__}")
     subparsers = parser.add_subparsers(dest="command")
 
     # Backtest subcommand
-    backtest_parser = subparsers.add_parser("backtest", help="Run backtest on historical traces")
+    backtest_parser = subparsers.add_parser("backtest", help="Run offline backtesting on a JSONL trace file")
     backtest_parser.add_argument("traces_file", help="Path to JSONL traces file")
     backtest_parser.set_defaults(func=cmd_backtest)
-
-    # Version subcommand
-    version_parser = subparsers.add_parser("version", help="Print version")
-    version_parser.set_defaults(func=cmd_version)
 
     args = parser.parse_args()
 
