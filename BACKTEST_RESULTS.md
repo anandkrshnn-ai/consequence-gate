@@ -20,10 +20,10 @@ To validate `consequence-gate`'s evaluation pipeline without requiring live data
 | Metric | Result | Description |
 |---|---|---|
 | **Total Traces Evaluated** | **500** | Full synthetic corpus spanning financial, database, and comms tools |
-| **Benign Pass-Through (True Negatives)** | **294** (58.8%) | Benign operations correctly identified and passed as `ALLOW` |
-| **Downstream Hazards Intercepted** | **87** (17.4%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% recall on this synthetic corpus* |
-| **Over-Blocked Operations Relieved** | **59** (11.8%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted |
-| **Ambiguous / Escalated to Human** | **60** (12.0%) | Missing context or unrecognized tools safely routed to `ASK` |
+| **Benign Pass-Through (True Negatives)** | **252** (50.4%) | Benign operations correctly identified and passed as `ALLOW` |
+| **Downstream Hazards Intercepted** | **129** (25.8%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% recall (129/129) on this synthetic corpus* |
+| **Over-Blocked Operations Relieved** | **35** (7.0%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted |
+| **Ambiguous / Escalated to Human** | **84** (16.8%) | Missing context, high-value transfers, or unrecognized tools safely routed to `ASK` |
 
 ---
 
@@ -31,13 +31,13 @@ To validate `consequence-gate`'s evaluation pipeline without requiring live data
 
 The benchmark trace dataset (`examples/benchmark_traces.jsonl`) contains 4 categories of tool-call patterns:
 
-1. **Benign Agent Calls (60%):** Standard queries, micro-transfers with verified KYC, safe single-row updates, and scoped transactional notifications.
-2. **Consequence Hazards (25%):** Calls that pass standard JSON schema validators and static regex checks, but cause severe downstream impact:
-   - Financial transfers that exceed 24h rolling velocity limits (`INR 25,000` cap).
-   - High-blast-radius unindexed database deletions (`150,000+` rows with cascading foreign keys).
-   - Unsuppressed broadcast marketing campaigns without canary cohorts (`85,000+` recipients).
-3. **Static Over-Blocking (10%):** Benign operations incorrectly blocked by static regex gates (e.g. `archive_old_session` blocked because it contains the keyword `delete`).
-4. **Ambiguous Context (5%):** Unrecognized tools or missing session parameters that test whether the system safely falls back to `ASK`.
+1. **Benign Agent Calls (295 traces / 59.0%):** Standard queries, micro-transfers with verified KYC, safe single-row updates, and scoped transactional notifications.
+2. **Consequence Hazards (129 traces / 25.8%):** Calls that pass standard JSON schema validators and static regex checks, but cause severe downstream impact:
+   - Financial transfers that exceed 24h rolling velocity limits (`INR 25,000` cap) — **32 traces**.
+   - High-blast-radius unindexed database deletions (`150,000+` rows with cascading foreign keys) — **55 traces**.
+   - Unsuppressed broadcast marketing campaigns without canary cohorts (`85,000+` recipients) — **42 traces**.
+3. **Static Over-Blocking (52 traces / 10.4%):** Benign operations incorrectly blocked by static regex gates (e.g. `archive_old_session` blocked because it contains the keyword `delete`).
+4. **Ambiguous Context (24 traces / 4.8%):** Unrecognized tools or missing session parameters that test whether the system safely falls back to `ASK`.
 
 ---
 
@@ -61,12 +61,12 @@ consequence-gate backtest examples/benchmark_traces.jsonl --json
 ```text
 ================ CONSEQUENCE GATE BACKTEST REPORT ================
 Total Traces Evaluated:      500
-True Negatives:              294
-False Negatives Caught:      87
-False Positives Relieved:    59
-Other / Unclassified:        60
+Benign Pass-Through (TN):    252
+Hazards Intercepted:         129
+Over-Blocked Relieved (FP):  35
+Ambiguous / Escalated:       84
 ------------------------------------------------------------------
-False Negative Catch Rate:   17.40%
-False Positive Relief Rate:  11.80%
+Hazard Interception Share:   25.80%
+False Positive Relief Share: 7.00%
 ==================================================================
 ```

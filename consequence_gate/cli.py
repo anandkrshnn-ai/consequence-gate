@@ -20,21 +20,41 @@ from .simulators.financial import FinancialDeltaPredictor
 
 
 def default_evaluator(trace: dict) -> str:
-    """Heuristic evaluator for CLI demo and trace analysis."""
+    """Heuristic multi-domain evaluator for CLI backtesting across financial, DB, and comms tools."""
     tool = trace.get("tool_name", "")
     args = trace.get("tool_args", {})
+    ctx = trace.get("session_context", {})
 
     tool_lower = tool.lower()
     args_str = str(args).lower()
 
+    # 1. Database blast-radius hazards
     if any(k in tool_lower for k in ("delete", "drop", "purge", "truncate")) or any(
         k in args_str for k in ("drop ", "delete from", "truncate ", "purge")
     ):
         return "DENY"
-    if "transfer" in tool_lower or "pay" in tool_lower:
+
+    # 2. Financial velocity & high-value escalations
+    if "transfer" in tool_lower or "pay" in tool_lower or "payout" in tool_lower or "refund" in tool_lower:
         amount = args.get("amount", 0)
-        if isinstance(amount, (int, float)) and amount > 5000:
-            return "ASK"
+        spend = ctx.get("account_rolling_24h_spend", 0)
+        tier_limit = ctx.get("tier_limit", 25000)
+        if isinstance(amount, (int, float)):
+            if spend + amount > tier_limit:
+                return "DENY"
+            if amount > 5000:
+                return "ASK"
+
+    # 3. Communications broadcast & suppression hazards
+    if any(k in tool_lower for k in ("broadcast", "campaign", "blast", "newsletter", "email", "sms", "notify")):
+        recipients = args.get("recipient_count") or args.get("recipients_count") or 0
+        if recipients > 10000 or ctx.get("suppression_verified") is False:
+            return "DENY"
+
+    # 4. Unknown/ambiguous tools
+    if "unknown" in tool_lower or not tool:
+        return "ASK"
+
     return "ALLOW"
 
 
@@ -61,13 +81,13 @@ def cmd_backtest(args):
         print()
         print("================ CONSEQUENCE GATE BACKTEST REPORT ================")
         print(f"Total Traces Evaluated:      {report['total_traces']}")
-        print(f"True Negatives:              {report['true_negative']}")
-        print(f"False Negatives Caught:      {report['false_negative_caught']}")
-        print(f"False Positives Relieved:    {report['false_positive_relieved']}")
-        print(f"Other / Unclassified:        {report['other']}")
+        print(f"Benign Pass-Through (TN):    {report['true_negative']}")
+        print(f"Hazards Intercepted:         {report['false_negative_caught']}")
+        print(f"Over-Blocked Relieved (FP):  {report['false_positive_relieved']}")
+        print(f"Ambiguous / Escalated:       {report['other']}")
         print("-" * 66)
-        print(f"False Negative Catch Rate:   {report['false_negative_rate']:.2%}")
-        print(f"False Positive Relief Rate:  {report['false_positive_relief_rate']:.2%}")
+        print(f"Hazard Interception Share:   {report['false_negative_rate']:.2%}")
+        print(f"False Positive Relief Share: {report['false_positive_relief_rate']:.2%}")
         print("=" * 66)
 
 
