@@ -25,12 +25,11 @@ Usage:
 
 import argparse
 import sys
-from pathlib import Path
 
 from consequence_gate.integrations.mcp_proxy import (
-    create_financial_mcp_proxy,
-    create_database_mcp_proxy,
     create_communications_mcp_proxy,
+    create_database_mcp_proxy,
+    create_financial_mcp_proxy,
 )
 
 
@@ -40,20 +39,26 @@ def parse_args():
 
     # Financial subcommand
     financial_parser = subparsers.add_parser("financial", help="Financial disbursement gate")
-    financial_parser.add_argument("--downstream-command", required=True, help="Downstream MCP server command")
+    financial_parser.add_argument(
+        "--downstream-command", required=True, help="Downstream MCP server command"
+    )
     financial_parser.add_argument("--daily-tier-limit", type=float, default=25000.0)
     financial_parser.add_argument("--instant-wire-threshold", type=float, default=10000.0)
     financial_parser.add_argument("--max-retries", type=int, default=2)
 
     # Database subcommand
     db_parser = subparsers.add_parser("database", help="Database deletion gate")
-    db_parser.add_argument("--downstream-command", required=True, help="Downstream MCP server command")
+    db_parser.add_argument(
+        "--downstream-command", required=True, help="Downstream MCP server command"
+    )
     db_parser.add_argument("--max-autonomous-delete-rows", type=int, default=100)
     db_parser.add_argument("--max-retries", type=int, default=2)
 
     # Communications subcommand
     comm_parser = subparsers.add_parser("communications", help="Communications blast gate")
-    comm_parser.add_argument("--downstream-command", required=True, help="Downstream MCP server command")
+    comm_parser.add_argument(
+        "--downstream-command", required=True, help="Downstream MCP server command"
+    )
     comm_parser.add_argument("--max-autonomous-recipients", type=int, default=10000)
     comm_parser.add_argument("--canary-min-size", type=int, default=100)
     comm_parser.add_argument("--max-retries", type=int, default=2)

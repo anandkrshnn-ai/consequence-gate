@@ -1,6 +1,6 @@
-from consequence_gate.simulators.financial import FinancialDeltaPredictor
 from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
 from consequence_gate.core.models import GateDecision
+from consequence_gate.simulators.financial import FinancialDeltaPredictor
 
 
 def test_steer_on_tier_breach():
@@ -21,8 +21,11 @@ def test_idempotency_token_stable_across_retries():
     delta = predictor.simulate("process_claim", args, context)
     r1 = predictor.evaluate(delta, breaker)
     r2 = predictor.evaluate(delta, breaker)
-    assert r1.steer_payload["suggested_args"]["idempotency_key"] == \
-           r2.steer_payload["suggested_args"]["idempotency_key"] or r2.decision != GateDecision.STEER
+    assert (
+        r1.steer_payload["suggested_args"]["idempotency_key"]
+        == r2.steer_payload["suggested_args"]["idempotency_key"]
+        or r2.decision != GateDecision.STEER
+    )
 
 
 def test_low_confidence_always_asks():

@@ -18,7 +18,9 @@ from consequence_gate.integrations.langgraph_hook import create_financial_gate_m
 
 
 @tool
-def process_claim(amount: float, claim_id: str, currency: str = "INR", payout_method: str = "standard_ach") -> str:
+def process_claim(
+    amount: float, claim_id: str, currency: str = "INR", payout_method: str = "standard_ach"
+) -> str:
     """Process a claim payout."""
     return f"Processed claim {claim_id} for {amount} {currency} via {payout_method}"
 
@@ -36,7 +38,7 @@ def main():
     )
 
     # Create agent with middleware
-    agent = create_agent(
+    create_agent(
         model="claude-sonnet-4",
         tools=[process_claim],
         middleware=[middleware],

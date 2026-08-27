@@ -11,12 +11,9 @@ Tests cover:
 - Idempotency token stability across retries
 """
 
-from unittest.mock import MagicMock
-import pytest
-
-from consequence_gate.simulators.communications import OutboundCommunicationSimulator
 from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
 from consequence_gate.core.models import GateDecision
+from consequence_gate.simulators.communications import OutboundCommunicationSimulator
 
 
 def test_allow_within_safe_bounds():
@@ -208,5 +205,7 @@ def test_idempotency_token_stable():
     r2 = sim.evaluate(delta, breaker)
 
     assert r1.decision == GateDecision.STEER
-    assert r1.steer_payload["suggested_args"]["idempotency_key"] == \
-           r2.steer_payload["suggested_args"]["idempotency_key"]
+    assert (
+        r1.steer_payload["suggested_args"]["idempotency_key"]
+        == r2.steer_payload["suggested_args"]["idempotency_key"]
+    )

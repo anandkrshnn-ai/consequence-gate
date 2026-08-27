@@ -21,13 +21,14 @@ MCP spec reference:
 import json
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
-from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
-from ..simulators.financial import FinancialDeltaPredictor
-from ..simulators.database import DataDeletionSimulator
+from ..core.models import EvaluationResult, GateDecision
 from ..simulators.communications import OutboundCommunicationSimulator
+from ..simulators.database import DataDeletionSimulator
+from ..simulators.financial import FinancialDeltaPredictor
 
 
 class MCPConsequenceProxy:
@@ -49,10 +50,10 @@ class MCPConsequenceProxy:
     def __init__(
         self,
         downstream_command: list,
-        simulator_fn: Callable[[str, Dict[str, Any], Dict[str, Any]], Any],
+        simulator_fn: Callable[[str, dict[str, Any], dict[str, Any]], Any],
         evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult],
-        circuit_breaker: Optional[SteerCircuitBreaker] = None,
-        context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        circuit_breaker: SteerCircuitBreaker | None = None,
+        context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ):
         """
         Args:
@@ -68,13 +69,17 @@ class MCPConsequenceProxy:
         self.circuit_breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2)
         self.context_provider = context_provider or (lambda params: {})
 
-        self.downstream_process: Optional[subprocess.Popen] = None
+        self.downstream_process: subprocess.Popen | None = None
 
-    def _extract_natural_key(self, tool_name: str, arguments: Dict[str, Any]) -> str:
+    def _extract_natural_key(self, tool_name: str, arguments: dict[str, Any]) -> str:
         """Extract stable natural key for idempotency."""
-        return arguments.get("claim_id") or arguments.get("transaction_ref") or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+        return (
+            arguments.get("claim_id")
+            or arguments.get("transaction_ref")
+            or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+        )
 
-    def _intercept_tools_call(self, request: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _intercept_tools_call(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """
         Intercept a tools/call request. Returns a response dict if the gate
         decides DENY/ASK/STEER, or None if the request should be forwarded.
@@ -84,7 +89,7 @@ class MCPConsequenceProxy:
         arguments = params.get("arguments", {})
         context = self.context_provider(params)
 
-        natural_key = self._extract_natural_key(tool_name, arguments)
+        self._extract_natural_key(tool_name, arguments)
         delta = self.simulator_fn(tool_name, arguments, context)
         result = self.evaluator_fn(delta, self.circuit_breaker)
 
@@ -132,7 +137,7 @@ class MCPConsequenceProxy:
 
         return None  # Should not reach here
 
-    def _forward_to_downstream(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any]:
         """Forward request to downstream MCP server and return response."""
         if self.downstream_process is None:
             self.downstream_process = subprocess.Popen(
@@ -153,7 +158,7 @@ class MCPConsequenceProxy:
         response_line = self.downstream_process.stdout.readline()
         return json.loads(response_line)
 
-    def _process_line(self, line: str) -> Optional[str]:
+    def _process_line(self, line: str) -> str | None:
         """Process a single JSON-RPC line from client."""
         try:
             request = json.loads(line)
@@ -197,12 +202,13 @@ class MCPConsequenceProxy:
 
 # Convenience factory functions
 
+
 def create_financial_mcp_proxy(
     downstream_command: list,
     daily_tier_limit_inr: float = 25000.0,
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for financial-disbursement MCP proxy.
@@ -241,7 +247,7 @@ def create_database_mcp_proxy(
     max_autonomous_delete_rows: int = 100,
     db_conn=None,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for database-deletion MCP proxy.
@@ -279,7 +285,7 @@ def create_communications_mcp_proxy(
     canary_max_bounce_rate: float = 0.05,
     canary_max_complaint_rate: float = 0.01,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for communications-blast MCP proxy.

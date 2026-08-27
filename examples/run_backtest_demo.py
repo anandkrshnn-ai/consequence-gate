@@ -4,8 +4,8 @@ Minimal runnable demo of the backtest harness against the sample traces.
 
 from consequence_gate.backtest.harness import load_traces, run_backtest
 from consequence_gate.backtest.reporter import generate_report
-from consequence_gate.simulators.financial import FinancialDeltaPredictor
 from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
+from consequence_gate.simulators.financial import FinancialDeltaPredictor
 
 
 def simulate_and_evaluate(trace):

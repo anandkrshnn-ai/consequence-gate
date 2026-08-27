@@ -11,16 +11,14 @@ Tests cover:
 """
 
 from unittest.mock import MagicMock
-import pytest
 
-
+from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
+from consequence_gate.core.models import EvaluationResult, GateDecision
 from consequence_gate.integrations.strands_hook import (
     ConsequenceGateHook,
-    create_financial_gate_hook,
     create_database_gate_hook,
+    create_financial_gate_hook,
 )
-from consequence_gate.core.models import GateDecision, EvaluationResult
-from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
 
 
 class MockBeforeToolCallEvent:
@@ -242,7 +240,7 @@ def test_retry_cap_escalates_after_max():
     )
 
     # First two calls: STEER
-    for i in range(2):
+    for _i in range(2):
         event = MockBeforeToolCallEvent(
             "process_claim",
             {"amount": 50000, "claim_id": "c6"},  # same natural key

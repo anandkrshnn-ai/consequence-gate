@@ -6,10 +6,10 @@ the trace's recorded existing_gate_decision and actual_execution_status.
 """
 
 import json
-from typing import Callable, Dict, Iterable, List
+from collections.abc import Callable, Iterable
 
 
-def load_traces(path: str) -> List[Dict]:
+def load_traces(path: str) -> list[dict]:
     traces = []
     with open(path) as f:
         for line in f:
@@ -19,7 +19,9 @@ def load_traces(path: str) -> List[Dict]:
     return traces
 
 
-def run_backtest(traces: Iterable[Dict], simulate_and_evaluate: Callable[[Dict], str]) -> List[Dict]:
+def run_backtest(
+    traces: Iterable[dict], simulate_and_evaluate: Callable[[dict], str]
+) -> list[dict]:
     """
     simulate_and_evaluate: function(trace) -> decision string ("ALLOW"/"DENY"/"ASK"/"STEER")
     Returns per-trace records annotated with quadrant classification.
@@ -30,7 +32,11 @@ def run_backtest(traces: Iterable[Dict], simulate_and_evaluate: Callable[[Dict],
         old_decision = trace.get("existing_gate_decision", "ALLOW")
         outcome = trace.get("actual_execution_status", "UNKNOWN")
 
-        if old_decision == "ALLOW" and new_decision in ("DENY", "STEER", "ASK") and outcome != "SUCCESS":
+        if (
+            old_decision == "ALLOW"
+            and new_decision in ("DENY", "STEER", "ASK")
+            and outcome != "SUCCESS"
+        ):
             quadrant = "FALSE_NEGATIVE_CAUGHT"
         elif old_decision in ("DENY", "ASK") and new_decision == "ALLOW":
             quadrant = "FALSE_POSITIVE_RELIEVED"

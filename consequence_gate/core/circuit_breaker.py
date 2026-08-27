@@ -13,21 +13,23 @@ Design contract (see project history / design notes):
   loop-thrashing, independent of guidance quality.
 """
 
-from typing import Any, Dict
-from .models import GateDecision, EvaluationResult
+from typing import Any
+
+from .models import EvaluationResult, GateDecision
 
 
 class SteerCircuitBreaker:
     def __init__(self, max_retries: int = 2):
         self.max_retries = max_retries
-        self._attempts: Dict[str, int] = {}
-        self._responses: Dict[str, EvaluationResult] = {}
+        self._attempts: dict[str, int] = {}
+        self._responses: dict[str, EvaluationResult] = {}
 
     def token_for(self, natural_key: str) -> str:
         return f"steer_{natural_key}"
 
-    def resolve(self, natural_key: str, confidence: float,
-                base_steer: Dict[str, Any]) -> EvaluationResult:
+    def resolve(
+        self, natural_key: str, confidence: float, base_steer: dict[str, Any]
+    ) -> EvaluationResult:
         token = self.token_for(natural_key)
 
         if token in self._responses:

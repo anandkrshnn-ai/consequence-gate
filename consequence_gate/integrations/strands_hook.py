@@ -15,24 +15,27 @@ Design contract (from project history):
   confident ALLOW/DENY on unfounded projections.
 """
 
-from typing import Any, Callable, Dict, Optional
 import json
+from collections.abc import Callable
+from typing import Any
 
 try:
     from strands.hooks import BeforeToolCallEvent
     from strands.hooks.events import HookProvider, HookRegistry
 except ImportError:
+
     class HookProvider:  # type: ignore[no-redef]
         """Fallback base class when strands-agents is not installed."""
+
         pass
 
     BeforeToolCallEvent = Any  # type: ignore[misc,assignment]
     HookRegistry = Any  # type: ignore[misc,assignment]
 
-from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
-from ..simulators.financial import FinancialDeltaPredictor
+from ..core.models import EvaluationResult, GateDecision
 from ..simulators.database import DataDeletionSimulator
+from ..simulators.financial import FinancialDeltaPredictor
 
 
 class ConsequenceGateHook(HookProvider):
@@ -57,10 +60,10 @@ class ConsequenceGateHook(HookProvider):
 
     def __init__(
         self,
-        simulator_fn: Callable[[str, Dict[str, Any], Dict[str, Any]], Any],
-        evaluator_fn: Optional[Callable[[Any, SteerCircuitBreaker], EvaluationResult]] = None,
-        circuit_breaker: Optional[SteerCircuitBreaker] = None,
-        context_provider: Optional[Callable[[BeforeToolCallEvent], Dict[str, Any]]] = None,
+        simulator_fn: Callable[[str, dict[str, Any], dict[str, Any]], Any],
+        evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult] | None = None,
+        circuit_breaker: SteerCircuitBreaker | None = None,
+        context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
     ):
         """
         Args:
@@ -79,7 +82,7 @@ class ConsequenceGateHook(HookProvider):
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
         registry.add_callback(BeforeToolCallEvent, self.intercept)
 
-    def _default_context(self, event: BeforeToolCallEvent) -> Dict[str, Any]:
+    def _default_context(self, event: BeforeToolCallEvent) -> dict[str, Any]:
         """
         Minimal default context extractor. Override this to pull in
         session state, user identity, account telemetry, etc.
@@ -96,7 +99,9 @@ class ConsequenceGateHook(HookProvider):
 
         # Extract natural key from args (domain-specific; financial uses claim_id,
         # database uses table+filter hash, etc.)
-        natural_key = args.get("claim_id") or args.get("transaction_ref") or f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+        args.get("claim_id") or args.get(
+            "transaction_ref"
+        ) or f"{tool_name}:{json.dumps(args, sort_keys=True)}"
 
         # Run simulation + evaluation
         delta = self.simulator_fn(tool_name, args, context)
@@ -106,6 +111,7 @@ class ConsequenceGateHook(HookProvider):
         else:
             # Fallback: generic evaluator (not domain-aware, but safe)
             from ..core.evaluator import BlastRadiusEvaluator
+
             evaluator = BlastRadiusEvaluator()
             gate_decision = evaluator.evaluate(delta)
             # Wrap generic decision into EvaluationResult for uniform handling
@@ -152,11 +158,12 @@ class ConsequenceGateHook(HookProvider):
 
 # Convenience factory functions for common domain simulators
 
+
 def create_financial_gate_hook(
     daily_tier_limit_inr: float = 25000.0,
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[BeforeToolCallEvent], Dict[str, Any]]] = None,
+    context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a financial-disbursement gate hook.
@@ -192,7 +199,7 @@ def create_database_gate_hook(
     max_autonomous_delete_rows: int = 100,
     db_conn=None,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[BeforeToolCallEvent], Dict[str, Any]]] = None,
+    context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a database-deletion gate hook.

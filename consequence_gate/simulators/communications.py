@@ -14,11 +14,11 @@ happen, not to model intermediate states.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 from enum import Enum
+from typing import Any
 
-from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.models import EvaluationResult, GateDecision
 
 
 class CommunicationChannel(str, Enum):
@@ -33,7 +33,7 @@ class CommunicationBlastDelta:
     tool_name: str
     channel: str
     total_recipients: int
-    segment_breakdown: Dict[str, int]
+    segment_breakdown: dict[str, int]
     has_unsubscribe_suppression: bool
     canary_cohort_size: int
     predicted_bounce_rate: float
@@ -42,13 +42,13 @@ class CommunicationBlastDelta:
     irreversibility_score: float
     confidence: float
     natural_key: str
-    simulated_side_effects: List[str] = field(default_factory=list)
+    simulated_side_effects: list[str] = field(default_factory=list)
 
 
 class OutboundCommunicationSimulator:
     """
     Simulates outbound communication blast radius and reputation risk.
-    
+
     Key design decisions:
     - No partial execution modeling — sends are atomic and irreversible.
     - Unsubscribe suppression is mandatory for compliance (CAN-SPAM, GDPR).
@@ -73,8 +73,8 @@ class OutboundCommunicationSimulator:
     def simulate(
         self,
         tool_name: str,
-        args: Dict[str, Any],
-        context: Dict[str, Any],
+        args: dict[str, Any],
+        context: dict[str, Any],
     ) -> CommunicationBlastDelta:
         channel = args.get("channel", "email").lower()
         recipient_list = args.get("recipients", [])
@@ -82,7 +82,7 @@ class OutboundCommunicationSimulator:
         suppress_unsubscribes = args.get("suppress_unsubscribes", True)
         canary_enabled = args.get("canary_enabled", False)
         canary_size = args.get("canary_size", self.canary_min_size)
-        
+
         natural_key = f"{channel}:{args.get('campaign_id') or len(recipient_list)}"
 
         # Calculate total recipients
@@ -256,7 +256,7 @@ def create_communication_gate_hook(
 ):
     """
     Factory for creating a communication gate simulator.
-    
+
     Usage:
         simulator = create_communication_gate_hook(
             max_autonomous_recipients=10000,
@@ -269,7 +269,7 @@ def create_communication_gate_hook(
         )
     """
     from ..integrations.strands_hook import ConsequenceGateHook
-    
+
     simulator = OutboundCommunicationSimulator(
         max_autonomous_recipients=max_autonomous_recipients,
         max_daily_send_limit=max_daily_send_limit,

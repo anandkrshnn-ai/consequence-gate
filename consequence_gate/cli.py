@@ -15,8 +15,6 @@ from pathlib import Path
 from . import __version__
 from .backtest.harness import load_traces, run_backtest
 from .backtest.reporter import generate_report
-from .core.circuit_breaker import SteerCircuitBreaker
-from .simulators.financial import FinancialDeltaPredictor
 
 
 def demo_evaluator(trace: dict) -> str:
@@ -35,7 +33,12 @@ def demo_evaluator(trace: dict) -> str:
         return "DENY"
 
     # 2. Financial velocity & high-value escalations
-    if "transfer" in tool_lower or "pay" in tool_lower or "payout" in tool_lower or "refund" in tool_lower:
+    if (
+        "transfer" in tool_lower
+        or "pay" in tool_lower
+        or "payout" in tool_lower
+        or "refund" in tool_lower
+    ):
         amount = args.get("amount", 0)
         spend = ctx.get("account_rolling_24h_spend", 0)
         tier_limit = ctx.get("tier_limit", 25000)
@@ -46,7 +49,10 @@ def demo_evaluator(trace: dict) -> str:
                 return "ASK"
 
     # 3. Communications broadcast & suppression hazards
-    if any(k in tool_lower for k in ("broadcast", "campaign", "blast", "newsletter", "email", "sms", "notify")):
+    if any(
+        k in tool_lower
+        for k in ("broadcast", "campaign", "blast", "newsletter", "email", "sms", "notify")
+    ):
         recipients = args.get("recipient_count") or args.get("recipients_count") or 0
         if recipients > 10000 or ctx.get("suppression_verified") is False:
             return "DENY"
@@ -60,7 +66,6 @@ def demo_evaluator(trace: dict) -> str:
 
 # Backwards compatibility alias
 default_evaluator = demo_evaluator
-
 
 
 def cmd_backtest(args):
@@ -85,7 +90,9 @@ def cmd_backtest(args):
     else:
         print()
         print("[!] NOTICE: Running with built-in demo_evaluator (synthetic trace heuristic).")
-        print("    For production evaluation, pass domain simulator instances. See BACKTEST_RESULTS.md.")
+        print(
+            "    For production evaluation, pass domain simulator instances. See BACKTEST_RESULTS.md."
+        )
         print()
         print("================ CONSEQUENCE GATE BACKTEST REPORT ================")
         print(f"Total Traces Evaluated:      {report['total_traces']}")
@@ -108,7 +115,9 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # Backtest subcommand
-    bt_parser = subparsers.add_parser("backtest", help="Run offline backtesting on a JSONL trace file")
+    bt_parser = subparsers.add_parser(
+        "backtest", help="Run offline backtesting on a JSONL trace file"
+    )
     bt_parser.add_argument("traces_file", help="Path to JSONL traces file")
     bt_parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     bt_parser.set_defaults(func=cmd_backtest)

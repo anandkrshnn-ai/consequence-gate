@@ -3,8 +3,8 @@ Unit tests for consequence_gate CLI entry point.
 """
 
 import json
-from consequence_gate.cli import demo_evaluator, default_evaluator, main
-import pytest
+
+from consequence_gate.cli import default_evaluator, demo_evaluator, main
 
 
 def test_demo_evaluator():
@@ -20,8 +20,16 @@ def test_demo_evaluator():
 def test_cli_backtest(tmp_path, capsys, monkeypatch):
     trace_file = tmp_path / "traces.jsonl"
     traces = [
-        {"tool_name": "get_balance", "existing_gate_decision": "ALLOW", "actual_execution_status": "SUCCESS"},
-        {"tool_name": "delete_all", "existing_gate_decision": "ALLOW", "actual_execution_status": "FAILED"},
+        {
+            "tool_name": "get_balance",
+            "existing_gate_decision": "ALLOW",
+            "actual_execution_status": "SUCCESS",
+        },
+        {
+            "tool_name": "delete_all",
+            "existing_gate_decision": "ALLOW",
+            "actual_execution_status": "FAILED",
+        },
     ]
     with open(trace_file, "w") as f:
         for t in traces:

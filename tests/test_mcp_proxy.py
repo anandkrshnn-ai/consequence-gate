@@ -12,11 +12,9 @@ Tests cover:
 
 import json
 from unittest.mock import MagicMock
-import pytest
 
+from consequence_gate.core.models import EvaluationResult, GateDecision
 from consequence_gate.integrations.mcp_proxy import MCPConsequenceProxy, create_financial_mcp_proxy
-from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
-from consequence_gate.core.models import GateDecision, EvaluationResult
 
 
 def test_non_tools_call_passes_through():
@@ -46,7 +44,9 @@ def test_tools_call_allowed_forwards():
     """tools/call with ALLOW decision forwards to downstream."""
 
     def simulator_fn(tool_name, args, context):
-        return MagicMock(confidence=0.9, numeric_deltas={"balance": -1000}, irreversibility_score=0.2)
+        return MagicMock(
+            confidence=0.9, numeric_deltas={"balance": -1000}, irreversibility_score=0.2
+        )
 
     def evaluator_fn(delta, breaker):
         return EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="Within bounds")
@@ -56,7 +56,9 @@ def test_tools_call_allowed_forwards():
         simulator_fn=simulator_fn,
         evaluator_fn=evaluator_fn,
     )
-    proxy._forward_to_downstream = MagicMock(return_value={"jsonrpc": "2.0", "id": 1, "result": {"content": []}})
+    proxy._forward_to_downstream = MagicMock(
+        return_value={"jsonrpc": "2.0", "id": 1, "result": {"content": []}}
+    )
 
     request = {
         "jsonrpc": "2.0",
@@ -74,10 +76,14 @@ def test_tools_call_denied_returns_error():
     """tools/call with DENY decision returns JSON-RPC error."""
 
     def simulator_fn(tool_name, args, context):
-        return MagicMock(confidence=0.9, numeric_deltas={"balance": -500000}, irreversibility_score=0.95)
+        return MagicMock(
+            confidence=0.9, numeric_deltas={"balance": -500000}, irreversibility_score=0.95
+        )
 
     def evaluator_fn(delta, breaker):
-        return EvaluationResult(decision=GateDecision.DENY, confidence=0.9, reason="Critical breach")
+        return EvaluationResult(
+            decision=GateDecision.DENY, confidence=0.9, reason="Critical breach"
+        )
 
     proxy = MCPConsequenceProxy(
         downstream_command=["echo", "test"],
@@ -132,7 +138,9 @@ def test_tools_call_steer_returns_guidance():
     """tools/call with STEER decision returns structured guidance."""
 
     def simulator_fn(tool_name, args, context):
-        return MagicMock(confidence=0.9, numeric_deltas={"balance": -50000}, irreversibility_score=0.8)
+        return MagicMock(
+            confidence=0.9, numeric_deltas={"balance": -50000}, irreversibility_score=0.8
+        )
 
     def evaluator_fn(delta, breaker):
         return EvaluationResult(
@@ -142,7 +150,11 @@ def test_tools_call_steer_returns_guidance():
             steer_payload={
                 "guidance": "Split into instant + escrow",
                 "suggested_tool": "create_staged_disbursement",
-                "suggested_args": {"immediate_amount": 25000, "escrow_amount": 25000, "idempotency_key": "steer_c1"},
+                "suggested_args": {
+                    "immediate_amount": 25000,
+                    "escrow_amount": 25000,
+                    "idempotency_key": "steer_c1",
+                },
             },
         )
 
@@ -186,7 +198,12 @@ def test_financial_factory_proxy():
         "method": "tools/call",
         "params": {
             "name": "process_payout",
-            "arguments": {"amount": 50000, "currency": "INR", "payout_method": "instant_upi", "claim_id": "c1"},
+            "arguments": {
+                "amount": 50000,
+                "currency": "INR",
+                "payout_method": "instant_upi",
+                "claim_id": "c1",
+            },
         },
     }
     result = proxy._process_line(json.dumps(request))

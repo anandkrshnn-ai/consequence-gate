@@ -1,6 +1,6 @@
-from consequence_gate.simulators.database import DataDeletionSimulator
 from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
 from consequence_gate.core.models import GateDecision
+from consequence_gate.simulators.database import DataDeletionSimulator
 
 
 def test_no_db_conn_low_confidence_asks():

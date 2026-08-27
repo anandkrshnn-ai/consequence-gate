@@ -10,10 +10,10 @@ recursively, since ON DELETE CASCADE can compound across multiple hops.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
-from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.models import EvaluationResult, GateDecision
 
 
 @dataclass
@@ -24,19 +24,19 @@ class DeletionBlastDelta:
     has_unindexed_where_clause: bool
     is_hard_delete: bool
     has_active_foreign_key_cascades: bool
-    cascade_affected_tables: List[str]
+    cascade_affected_tables: list[str]
     irreversibility_score: float
     confidence: float
     natural_key: str
-    simulated_side_effects: List[str] = field(default_factory=list)
+    simulated_side_effects: list[str] = field(default_factory=list)
 
 
-def get_planner_row_estimate(db_conn, table: str, filters: Dict[str, Any]) -> tuple:
+def get_planner_row_estimate(db_conn, table: str, filters: dict[str, Any]) -> tuple:
     """Returns (estimated_rows, used_index). Uses plain EXPLAIN so the
     query is analyzed but never executed."""
     if not filters:
         where_clause = "TRUE"
-        params: List[Any] = []
+        params: list[Any] = []
     else:
         where_clause = " AND ".join(f"{k} = %s" for k in filters)
         params = list(filters.values())
@@ -49,7 +49,7 @@ def get_planner_row_estimate(db_conn, table: str, filters: Dict[str, Any]) -> tu
     return estimated_rows, used_index
 
 
-def walk_fk_cascade_depth(db_conn, table: str, visited: Optional[Set[str]] = None) -> List[str]:
+def walk_fk_cascade_depth(db_conn, table: str, visited: set[str] | None = None) -> list[str]:
     """Recursively walks ON DELETE CASCADE foreign keys depth-first."""
     if visited is None:
         visited = set()
@@ -81,8 +81,9 @@ class DataDeletionSimulator:
         self.max_autonomous_delete_rows = max_autonomous_delete_rows
         self.db_conn = db_conn  # optional live connection for EXPLAIN / FK introspection
 
-    def simulate(self, tool_name: str, args: Dict[str, Any],
-                  context: Dict[str, Any]) -> DeletionBlastDelta:
+    def simulate(
+        self, tool_name: str, args: dict[str, Any], context: dict[str, Any]
+    ) -> DeletionBlastDelta:
         table = args.get("table", "unknown")
         filters = args.get("filters", {})
         force_hard_delete = args.get("hard_delete", False)
@@ -118,27 +119,36 @@ class DataDeletionSimulator:
             side_effects.append("Full table scan required; risk of lock escalation")
 
         return DeletionBlastDelta(
-            tool_name=tool_name, target_table=table,
+            tool_name=tool_name,
+            target_table=table,
             estimated_affected_rows=estimated_rows,
             has_unindexed_where_clause=unindexed,
             is_hard_delete=force_hard_delete,
             has_active_foreign_key_cascades=has_cascades,
             cascade_affected_tables=cascade_tables,
-            irreversibility_score=irreversibility, confidence=confidence,
-            natural_key=natural_key, simulated_side_effects=side_effects,
+            irreversibility_score=irreversibility,
+            confidence=confidence,
+            natural_key=natural_key,
+            simulated_side_effects=side_effects,
         )
 
-    def evaluate(self, delta: DeletionBlastDelta,
-                  circuit_breaker: SteerCircuitBreaker) -> EvaluationResult:
+    def evaluate(
+        self, delta: DeletionBlastDelta, circuit_breaker: SteerCircuitBreaker
+    ) -> EvaluationResult:
         if delta.confidence < 0.70:
             return EvaluationResult(
-                decision=GateDecision.ASK, confidence=delta.confidence,
+                decision=GateDecision.ASK,
+                confidence=delta.confidence,
                 reason="Missing live query-planner access; unable to calculate blast radius with confidence.",
             )
 
-        if delta.estimated_affected_rows > (self.max_autonomous_delete_rows * 10) and delta.is_hard_delete:
+        if (
+            delta.estimated_affected_rows > (self.max_autonomous_delete_rows * 10)
+            and delta.is_hard_delete
+        ):
             return EvaluationResult(
-                decision=GateDecision.DENY, confidence=delta.confidence,
+                decision=GateDecision.DENY,
+                confidence=delta.confidence,
                 reason=f"CRITICAL BLAST RADIUS: hard delete would purge ~{delta.estimated_affected_rows:,} rows.",
             )
 
@@ -160,6 +170,7 @@ class DataDeletionSimulator:
             return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
 
         return EvaluationResult(
-            decision=GateDecision.ALLOW, confidence=delta.confidence,
+            decision=GateDecision.ALLOW,
+            confidence=delta.confidence,
             reason=f"Delete operation is bounded (~{delta.estimated_affected_rows} rows) within safety envelope.",
         )

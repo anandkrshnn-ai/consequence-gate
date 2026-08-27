@@ -11,28 +11,29 @@ Reference:
 - ToolNode: https://reference.langchain.com/python/langgraph.prebuilt/tool_node/ToolNode
 """
 
-from typing import Any, Callable, Dict, Optional
 import json
+from collections.abc import Callable
+from typing import Any
 
 try:
-    from langchain_core.messages import ToolMessage
     from langchain.tools.tool_node import ToolCallRequest
+    from langchain_core.messages import ToolMessage
 except ImportError:
     ToolMessage = None
     ToolCallRequest = None
 
-from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
-from ..simulators.financial import FinancialDeltaPredictor
-from ..simulators.database import DataDeletionSimulator
+from ..core.models import EvaluationResult, GateDecision
 from ..simulators.communications import OutboundCommunicationSimulator
+from ..simulators.database import DataDeletionSimulator
+from ..simulators.financial import FinancialDeltaPredictor
 
 
 def create_consequence_middleware(
-    simulator_fn: Callable[[str, Dict[str, Any], Dict[str, Any]], Any],
+    simulator_fn: Callable[[str, dict[str, Any], dict[str, Any]], Any],
     evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult],
-    circuit_breaker: Optional[SteerCircuitBreaker] = None,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    circuit_breaker: SteerCircuitBreaker | None = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ):
     """
     Factory for creating a LangGraph middleware that wraps tool calls.
@@ -78,7 +79,9 @@ def create_consequence_middleware(
         context = context_fn(state)
 
         # Extract natural key for idempotency
-        natural_key = arguments.get("claim_id") or arguments.get("transaction_ref") or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+        arguments.get("claim_id") or arguments.get(
+            "transaction_ref"
+        ) or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
 
         # Run simulation + evaluation
         delta = simulator_fn(tool_name, arguments, context)
@@ -111,7 +114,12 @@ def create_consequence_middleware(
                 f"STEER_GUIDANCE: {guidance}\\n"
                 f"Suggested alternative: {suggested_tool} with args {suggested_args}"
             )
-            return ToolMessage(content=error_text, tool_call_id=tool_call.get("id", ""), name=tool_name, status="error")
+            return ToolMessage(
+                content=error_text,
+                tool_call_id=tool_call.get("id", ""),
+                name=tool_name,
+                status="error",
+            )
 
         # Should not reach here
         return handler(request)
@@ -121,11 +129,12 @@ def create_consequence_middleware(
 
 # Convenience factory functions
 
+
 def create_financial_gate_middleware(
     daily_tier_limit_inr: float = 25000.0,
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ):
     """Factory for financial gate middleware."""
     predictor = FinancialDeltaPredictor(
@@ -149,7 +158,7 @@ def create_database_gate_middleware(
     max_autonomous_delete_rows: int = 100,
     db_conn=None,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ):
     """Factory for database gate middleware."""
     simulator = DataDeletionSimulator(
@@ -175,7 +184,7 @@ def create_communications_gate_middleware(
     canary_max_bounce_rate: float = 0.05,
     canary_max_complaint_rate: float = 0.01,
     max_retries: int = 2,
-    context_provider: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ):
     """Factory for communications gate middleware."""
     simulator = OutboundCommunicationSimulator(

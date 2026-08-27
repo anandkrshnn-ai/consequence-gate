@@ -19,5 +19,7 @@ def test_same_natural_key_returns_cached_response():
     steer = {"guidance": "try alt path", "suggested_tool": "alt", "suggested_args": {}}
     r1 = breaker.resolve("txn_2", 0.9, dict(steer))
     r2 = breaker.resolve("txn_2", 0.9, dict(steer))
-    assert r1.steer_payload["suggested_args"]["idempotency_key"] == \
-           r2.steer_payload["suggested_args"]["idempotency_key"]
+    assert (
+        r1.steer_payload["suggested_args"]["idempotency_key"]
+        == r2.steer_payload["suggested_args"]["idempotency_key"]
+    )
