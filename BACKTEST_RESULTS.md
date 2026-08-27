@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > **Synthetic Dataset & Demo Evaluator Disclosure:**  
 > 1. **Synthetic Data:** The traces evaluated in this report were **synthetically generated** (`examples/benchmark_traces.jsonl`) to validate the offline backtest harness, simulator logic, and four-quadrant classification pipeline end-to-end. They do **not** represent production traffic or real-world customer telemetry.
-> 2. **Evaluator Scope:** The out-of-the-box CLI runner uses a standalone heuristic evaluator (`cli.default_evaluator`) calibrated specifically to demonstrate the harness mechanics without requiring live PostgreSQL instances or payment APIs. In production, users pass their configured domain simulators (`FinancialDeltaPredictor`, `DatabaseConsequencePredictor`, `CommunicationBlastPredictor`) into `run_backtest(traces, evaluator)`.
+> 2. **Evaluator Scope:** The out-of-the-box CLI runner uses a standalone heuristic evaluator (`cli.demo_evaluator`) calibrated specifically to demonstrate the harness mechanics without requiring live PostgreSQL instances or payment APIs. In production, users pass their configured domain simulators (`FinancialDeltaPredictor`, `DatabaseConsequencePredictor`, `CommunicationBlastPredictor`) into `run_backtest(traces, evaluator)`.
 > 3. **100% Recall Context:** The 100% recall on this synthetic corpus reflects exact matching against the known generation constraints of this sample dataset, proving harness pipeline correctness rather than generalization across unconstrained enterprise workloads.
 
 **Date:** August 27, 2026  
