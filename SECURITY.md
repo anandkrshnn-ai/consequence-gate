@@ -5,7 +5,7 @@
 If you discover a security vulnerability or bypass vector in `consequence-gate`, please **do not** open a public GitHub issue.
 
 Please report vulnerabilities privately:
-- **Email:** [anandkrshnn@gmail.com](mailto:anandkrshnn@gmail.com)
+- **Email:** [anandkrshnn@outlook.com](mailto:anandkrshnn@outlook.com)
 - **Subject Line:** `[SECURITY] consequence-gate vulnerability report`
 - **Response Timeline:** You will receive an initial response within 24 hours acknowledging receipt and a remediation plan within 72 hours.
 

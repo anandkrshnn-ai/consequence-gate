@@ -9,7 +9,7 @@ description = "Speculative outcome-simulation layer for AI agent tool calls — 
 readme = "README.md"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "Anandkrishnan Shnn", email = "anandkrshnn@gmail.com"}
+    {name = "Anandkrishnan Shnn", email = "anandkrshnn@outlook.com"}
 ]
 requires-python = ">=3.10"
 classifiers = [

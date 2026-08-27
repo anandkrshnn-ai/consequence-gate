@@ -170,4 +170,4 @@ print(report)
 
 **Version:** 0.1.0  
 **Last updated:** 2026-08-27  
-**Contact:** anandkrshnn@gmail.com
+**Contact:** anandkrshnn@outlook.com
