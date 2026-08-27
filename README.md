@@ -1,18 +1,24 @@
 # consequence-gate
 
+[![CI](https://github.com/anandkrshnn-ai/consequence-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/anandkrshnn-ai/consequence-gate/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://pypi.org/project/consequence-gate/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-30%20passed-success.svg)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-core%2090%25%2B-brightgreen.svg)](tests/)
+
 A speculative outcome-simulation layer for AI agent tool calls. It sits
 **upstream** of static runtime access gates (AgentWall, AWS Strands
 `BeforeToolCallEvent`, MCP proxies, Prisma AIRS) and asks a different
 question than they do.
 
-Static gates ask: *does this call match an allowed pattern?*
+Static gates ask: *does this call match an allowed pattern or schema?*  
 `consequence-gate` asks: *what will this call actually do, and is that
 outcome safe?*
 
 ## Why this exists
 
 Static runtime gates are fast (sub-millisecond) and effective at schema
-validation, RBAC, and pattern matching -- but a schema-valid,
+validation, RBAC, and pattern matching — but a schema-valid,
 policy-compliant call can still be consequence-catastrophic. A
 `process_claim(amount=50000)` call can pass every static check while
 pushing an account over its daily velocity limit via an irreversible
@@ -23,8 +29,8 @@ either passes it through, asks a human, denies it outright, or steers
 the agent toward a pre-vetted safer alternative.
 
 This is explicitly **not** a replacement for AgentWall / Strands / MCP
-proxies -- it's a prediction layer that runs before them, in the same
-pipeline.
+proxies — it is an outcome prediction layer that runs upstream of them in the same pipeline.
+
 
 ## Core contracts
 
@@ -185,34 +191,61 @@ agent = Agent(hooks=[hook])
 ## Decision Matrix
 
 | Decision | Strands | MCP | LangGraph |
-|----------|---------|-----|-----------|
+|---|---|---|---|
 | `ALLOW` | Executes normally | Forwarded to downstream MCP server | Tool executes via handler(request) |
 | `DENY` | `BLOCKED: <reason>` | JSON-RPC error (code=-32603) | Raises `ValueError("BLOCKED: ...")` |
 | `ASK` | `ESCALATION_REQUIRED: <reason>` | `isError=true` tool result | Raises `ValueError("ESCALATION_REQUIRED: ...")` |
 | `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative...` | `isError=true` + guidance | `ToolMessage(content="STEER_GUIDANCE: ...", status="error")` |
 
-## Backtest Workflow
+## Trust Model & Failure Modes
 
-Before deploying to production, run an offline backtest against historical
-execution traces:
+`consequence-gate` evaluates consequence by combining tool invocation parameters with runtime state returned from your `context_provider` callback (e.g. `account_rolling_24h_spend`, `kyc_verified`, `table_metadata`).
 
-1. Export 1,000-5,000 tool-call traces as JSONL (see `examples/backtest_sample_traces.jsonl`)
-2. Run `python examples/run_backtest_demo.py` against your traces
-3. Review the four-quadrant breakdown:
-   - True Negative: correctly allowed benign operations
-   - False Negative Caught: schema-valid calls that would have breached limits
-   - False Positive Relieved: over-blocking that the simulator would have avoided
-   - Steer Recovery Rate: percentage of blocked turns that could have completed via guidance
+### Critical Failure Modes & Mitigations
 
-## Status
+| Failure Mode | Risk | Mitigation in Consequence-Gate |
+|---|---|---|
+| **Stale Context / Cache Lag** | Context provider returns yesterday's spend balance, potentially missing velocity breaches. | If context is unverified or confidence drops below `0.8`, the gate **always defaults to `ASK` (human escalation)**. It never grants a speculative `ALLOW`. |
+| **Missing Context Provider** | Tool is invoked without any environment or database connection. | The simulator scores confidence as `0.0` or `0.5` and raises an escalation requirement (`ASK`). |
+| **Agent Steering Thrashing** | The agent repeatedly submits non-compliant alternative calls in response to guidance. | The `SteerCircuitBreaker` enforces a hard retry cap (default: 2 retries) before terminating the loop and escalating to human review. |
+| **Replay / Network Retries** | Network timeout causes agent runtime to resubmit the identical tool call. | Idempotency tokens are deterministically keyed to the entity's natural business key, guaranteeing identical evaluation without incrementing velocity counters twice. |
 
-- **Financial simulator**: functional with unit tests
-- **Database simulator**: functional with unit tests (EXPLAIN-based row estimation, recursive FK cascade walk)
-- **Communications simulator**: functional with unit tests (blast radius, unsubscribe compliance, canary cohorts, reputation impact)
-- **Strands integration**: functional with unit tests (full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle)
-- **MCP integration**: functional with unit tests (stdio transport, JSON-RPC error handling)
-- **LangGraph integration**: functional with unit tests (`@wrap_tool_call` middleware pattern)
+See [SECURITY.md](SECURITY.md) for full trust boundary documentation.
+
+## Offline Backtest Benchmark
+
+Before deploying to production, run an offline backtest against historical execution traces to measure the four-quadrant FP/FN/TN breakdown:
+
+```bash
+# Run backtest on the bundled 500-trace benchmark dataset
+consequence-gate backtest examples/benchmark_traces.jsonl
+```
+
+### Empirical Benchmark Summary (500 traces)
+
+- **True Negatives:** 294 (58.8%) — Benign operations passed through.
+- **False Negatives Caught:** 87 (17.4%) — Schema-valid hazards caught before execution.
+- **False Positives Relieved:** 59 (11.8%) — Benign calls over-blocked by static regex gates safely enabled.
+- **Ambiguous Escalations:** 60 (12.0%) — Low-confidence/unrecognized calls routed to `ASK`.
+
+Detailed breakdown and reproduction steps: [BACKTEST_RESULTS.md](BACKTEST_RESULTS.md) | [BACKTEST_METHODOLOGY.md](BACKTEST_METHODOLOGY.md)
+
+## Status & Test Coverage
+
+- **Financial simulator**: functional with unit tests (`tests/test_financial_sim.py`, 96% coverage)
+- **Database simulator**: functional with unit tests (`tests/test_database_sim.py`)
+- **Communications simulator**: functional with unit tests (`tests/test_communications_sim.py`, 90% coverage)
+- **Circuit breaker & natural-key idempotency**: functional with unit tests (`tests/test_circuit_breaker.py`, 95% coverage)
+- **Strands integration**: functional with unit tests (`tests/test_strands_hook.py`, 91% coverage)
+- **MCP integration**: functional with unit tests (`tests/test_mcp_proxy.py`)
+- **LangGraph integration**: functional with unit tests (`tests/test_langgraph_hook.py`)
+- **CLI & Backtesting**: functional with unit tests (`tests/test_cli.py`)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture guidelines, coding conventions, and instructions on creating new consequence simulators.
 
 ## License
 
 Apache-2.0
+

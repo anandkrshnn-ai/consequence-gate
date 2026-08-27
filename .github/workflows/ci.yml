@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Verify package version consistency
+        run: |
+          python -c "
+          from consequence_gate import __version__
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              pyproj_ver = tomllib.load(f)['project']['version']
+          assert __version__ == pyproj_ver, f'Version mismatch: __init__.py ({__version__}) != pyproject.toml ({pyproj_ver})'
+          print(f'✓ Version verified: {__version__}')
+          "
+
+      - name: Run pytest with coverage
+        run: |
+          pytest --cov=consequence_gate --cov-report=term-missing --cov-fail-under=65
+
+      - name: Verify CLI entrypoint
+        run: |
+          consequence-gate --version
+          consequence-gate backtest examples/backtest_sample_traces.jsonl --json
