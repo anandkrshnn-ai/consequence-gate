@@ -1,18 +1,86 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "consequence-gate"
 version = "0.1.0"
-description = "Speculative outcome-simulation gate for AI agent tool calls -- predicts consequence before execution and steers agents toward safer alternatives."
+description = "Speculative outcome-simulation layer for AI agent tool calls — predicts consequence (blast radius, irreversibility, velocity) before execution and steers agents toward safer alternatives."
 readme = "README.md"
-requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
-dependencies = []
+authors = [
+    {name = "Anandkrishnan Shnn", email = "anandkrshnn@gmail.com"}
+]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = [
+    "ai-agents",
+    "ai-safety",
+    "ai-governance",
+    "langchain",
+    "langgraph",
+    "mcp",
+    "agent-security",
+    "runtime-governance",
+]
+dependencies = [
+    "langchain>=0.3.0",
+    "langchain-agents>=0.3.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+]
+strands = [
+    "strands-agents>=0.1.0",
+]
+mcp = [
+    # No additional deps - stdio proxy uses only stdlib
+]
+langgraph = [
+    "langgraph>=0.2.0",
+]
 
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+[project.urls]
+Homepage = "https://github.com/anandkrshnn-ai/consequence-gate"
+Documentation = "https://github.com/anandkrshnn-ai/consequence-gate#readme"
+Repository = "https://github.com/anandkrshnn-ai/consequence-gate"
+Issues = "https://github.com/anandkrshnn-ai/consequence-gate/issues"
+
+[project.scripts]
+consequence-gate = "consequence_gate.cli:main"
 
 [tool.setuptools.packages.find]
+where = ["."]
 include = ["consequence_gate*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I", "N", "B", "C4", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --cov=consequence_gate --cov-report=term-missing"
