@@ -12,6 +12,7 @@ Tests cover:
 from unittest.mock import MagicMock
 import pytest
 
+pytest.importorskip("langchain_core")
 from langchain_core.messages import ToolMessage
 
 from consequence_gate.integrations.langgraph_hook import (

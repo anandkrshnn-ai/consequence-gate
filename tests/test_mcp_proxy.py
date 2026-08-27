@@ -43,7 +43,7 @@ def test_non_tools_call_passes_through():
 
 
 def test_tools_call_allowed_forwards():
-    """tools/call with ALLOW decision returns None (forward to downstream)."""
+    """tools/call with ALLOW decision forwards to downstream."""
 
     def simulator_fn(tool_name, args, context):
         return MagicMock(confidence=0.9, numeric_deltas={"balance": -1000}, irreversibility_score=0.2)
@@ -56,6 +56,7 @@ def test_tools_call_allowed_forwards():
         simulator_fn=simulator_fn,
         evaluator_fn=evaluator_fn,
     )
+    proxy._forward_to_downstream = MagicMock(return_value={"jsonrpc": "2.0", "id": 1, "result": {"content": []}})
 
     request = {
         "jsonrpc": "2.0",
@@ -65,8 +66,8 @@ def test_tools_call_allowed_forwards():
     }
     result = proxy._process_line(json.dumps(request))
 
-    # Should return None (forward to downstream)
-    assert result is None
+    proxy._forward_to_downstream.assert_called_once_with(request)
+    assert json.loads(result)["result"]["content"] == []
 
 
 def test_tools_call_denied_returns_error():

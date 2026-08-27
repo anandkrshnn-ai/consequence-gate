@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "consequence-gate"
-version = "0.1.0"
+version = "0.1.1"
 description = "Speculative outcome-simulation layer for AI agent tool calls — predicts consequence (blast radius, irreversibility, velocity) before execution and steers agents toward safer alternatives."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -34,10 +34,7 @@ keywords = [
     "agent-security",
     "runtime-governance",
 ]
-dependencies = [
-    "langchain>=0.3.0",
-    "langchain-agents>=0.3.0",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
@@ -46,14 +43,16 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
 ]
-strands = [
-    "strands-agents>=0.1.0",
-]
 mcp = [
     # No additional deps - stdio proxy uses only stdlib
 ]
 langgraph = [
     "langgraph>=0.2.0",
+    "langchain-core>=0.3.0",
+]
+langchain = [
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
 ]
 
 [project.urls]

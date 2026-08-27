@@ -14,8 +14,12 @@ Reference:
 from typing import Any, Callable, Dict, Optional
 import json
 
-from langchain_core.messages import ToolMessage
-from langchain.tools.tool_node import ToolCallRequest
+try:
+    from langchain_core.messages import ToolMessage
+    from langchain.tools.tool_node import ToolCallRequest
+except ImportError:
+    ToolMessage = None
+    ToolCallRequest = None
 
 from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker
