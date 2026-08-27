@@ -58,7 +58,8 @@ pipeline.
   `BeforeToolCallEvent` adapter with full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle.
 - `consequence_gate.integrations.mcp_proxy` -- **functional**: MCP stdio proxy
   intercepting `tools/call` requests, returning JSON-RPC errors or `isError=true` tool results.
-- `consequence_gate.integrations.langgraph_hook` -- stub (LangGraph node pending).
+- `consequence_gate.integrations.langgraph_hook` -- **functional**: LangGraph middleware
+  (`@wrap_tool_call`) and pre-tool-call node patterns for StateGraph workflows.
 - `consequence_gate.backtest` -- offline JSONL trace replay harness and
   four-quadrant FP/FN/TN report generator, for evaluating this layer
   against historical execution logs with zero production integration.
@@ -103,19 +104,9 @@ python -m consequence_gate.integrations.examples.run_mcp_proxy financial \\
     --downstream-command "npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb" \\
     --daily-tier-limit 25000 \\
     --instant-wire-threshold 10000
-
-# Database deletion gate
-python -m consequence_gate.integrations.examples.run_mcp_proxy database \\
-    --downstream-command "npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb" \\
-    --max-autonomous-delete-rows 100
-
-# Communications blast gate
-python -m consequence_gate.integrations.examples.run_mcp_proxy communications \\
-    --downstream-command "npx -y @modelcontextprotocol/server-sendgrid" \\
-    --max-autonomous-recipients 10000
 ```
 
-Then configure your MCP client (Claude Desktop, Cursor, Windsurf) to use the proxy:
+Configure in Claude Desktop / Cursor / Windsurf:
 
 ```json
 {
@@ -126,6 +117,48 @@ Then configure your MCP client (Claude Desktop, Cursor, Windsurf) to use the pro
     }
   }
 }
+```
+
+### LangGraph Integration
+
+Two patterns:
+
+**Pattern 1: Middleware with `create_agent()`**
+
+```python
+from langchain.agents import create_agent
+from consequence_gate.integrations.langgraph_hook import create_financial_gate_middleware
+
+middleware = create_financial_gate_middleware(
+    daily_tier_limit_inr=25000.0,
+    instant_wire_threshold=10000.0,
+    max_retries=2,
+)
+
+agent = create_agent(
+    model="claude-sonnet-4",
+    tools=[my_tool],
+    middleware=[middleware],
+)
+```
+
+**Pattern 2: Pre-tool-call node with `StateGraph`**
+
+```python
+from langgraph.graph import StateGraph, START, END
+from consequence_gate.integrations.langgraph_hook import create_financial_gate_node, AgentState
+
+gate_node = create_financial_gate_node(
+    daily_tier_limit_inr=25000.0,
+    instant_wire_threshold=10000.0,
+)
+
+builder = StateGraph(AgentState)
+builder.add_node("consequence_gate", gate_node)
+builder.add_node("agent", agent_node)
+builder.add_edge(START, "agent")
+builder.add_edge("agent", "consequence_gate")
+graph = builder.compile()
 ```
 
 ### Database Deletion Gate (Strands)
@@ -168,12 +201,12 @@ agent = Agent(hooks=[hook])
 
 ## Decision Matrix
 
-| Decision | Agent sees (Strands) | Agent sees (MCP) | Use case |
-|----------|---------------------|------------------|----------|
-| `ALLOW` | Tool executes normally | Forwarded to downstream MCP server | Projected outcome within safe bounds |
-| `DENY` | `BLOCKED: <reason>` | JSON-RPC error (code=-32603) | Critical breach (e.g., 10x over threshold + irreversible, compliance violation) |
-| `ASK` | `ESCALATION_REQUIRED: <reason>` | Tool result with `isError=true` | Low confidence, or moderate breach requiring human review |
-| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative...` | Tool result with `isError=true` + structured guidance | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete, canary cohort) |
+| Decision | Strands | MCP | LangGraph Middleware | LangGraph Node |
+|----------|---------|-----|---------------------|----------------|
+| `ALLOW` | Executes normally | Forwarded to downstream | Tool call unchanged | Tool calls pass through |
+| `DENY` | `BLOCKED: <reason>` | JSON-RPC error (code=-32603) | Raises `ValueError` | `ToolMessage` with error content |
+| `ASK` | `ESCALATION_REQUIRED: <reason>` | `isError=true` tool result | `interrupt()` for human approval | `interrupt()` for human approval |
+| `STEER` | `STEER_GUIDANCE: ...` | `isError=true` + guidance | Tool call with `_consequence_gate_result` | `ToolMessage` with guidance content |
 
 ## Backtest Workflow
 
@@ -195,7 +228,7 @@ execution traces:
 - **Communications simulator**: functional with unit tests (blast radius, unsubscribe compliance, canary cohorts, reputation impact)
 - **Strands integration**: functional with unit tests (full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle)
 - **MCP integration**: functional with unit tests (stdio transport, JSON-RPC error handling)
-- **LangGraph integration**: stub pending node implementation
+- **LangGraph integration**: functional with unit tests (middleware `@wrap_tool_call` + StateGraph node patterns)
 
 ## License
 
