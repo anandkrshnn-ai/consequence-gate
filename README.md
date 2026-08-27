@@ -213,19 +213,21 @@ agent = Agent(hooks=[hook])
 See [SECURITY.md](SECURITY.md) for full trust boundary documentation.
 
 ## Offline Backtest Benchmark
-
+ 
 Before deploying to production, run an offline backtest against historical execution traces to measure the four-quadrant FP/FN/TN breakdown:
 
 ```bash
-# Run backtest on the bundled 500-trace benchmark dataset
+# Run backtest on the bundled 500-trace synthetic benchmark dataset
 consequence-gate backtest examples/benchmark_traces.jsonl
 ```
 
-### Empirical Benchmark Summary (500 traces)
+### Empirical Benchmark Summary (500 Synthetic Traces)
 
-- **True Negatives:** 294 (58.8%) — Benign operations passed through.
-- **False Negatives Caught:** 87 (17.4%) — Schema-valid hazards caught before execution.
-- **False Positives Relieved:** 59 (11.8%) — Benign calls over-blocked by static regex gates safely enabled.
+*(Note: Evaluated on a synthetically generated trace corpus `examples/benchmark_traces.jsonl` to validate harness mechanics end-to-end; see [BACKTEST_RESULTS.md](BACKTEST_RESULTS.md) for disclosure)*
+
+- **Benign Pass-Through (True Negatives):** 294 (58.8%) — Benign operations passed through.
+- **Downstream Hazards Intercepted:** 87 (17.4%) — Schema-valid hazards caught before execution (100% of hazard traces in corpus).
+- **Over-Blocked Operations Relieved:** 59 (11.8%) — Benign calls over-blocked by naive regex gates safely enabled.
 - **Ambiguous Escalations:** 60 (12.0%) — Low-confidence/unrecognized calls routed to `ASK`.
 
 Detailed breakdown and reproduction steps: [BACKTEST_RESULTS.md](BACKTEST_RESULTS.md) | [BACKTEST_METHODOLOGY.md](BACKTEST_METHODOLOGY.md)

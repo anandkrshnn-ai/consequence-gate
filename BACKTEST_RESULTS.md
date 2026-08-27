@@ -1,25 +1,29 @@
 # Consequence-Gate Backtest Benchmark Results
 
+> [!IMPORTANT]
+> **Synthetic Dataset Disclosure:**  
+> The traces evaluated in this report were **synthetically generated** (`examples/benchmark_traces.jsonl`) to validate the offline backtest harness, simulator logic, and four-quadrant classification pipeline end-to-end. They do **not** represent production traffic or real-world customer telemetry. A backtest against your own historical logs will reflect your specific tool schemas, environment state, and policy thresholds.
+
 **Date:** August 27, 2026  
 **Artifact Version:** `v0.1.1`  
-**Dataset:** `examples/benchmark_traces.jsonl` (500 agent tool-call traces)  
+**Dataset:** `examples/benchmark_traces.jsonl` (500 synthetically generated agent tool-call traces)  
 **Harness:** `consequence_gate.backtest.harness`
 
 ---
 
 ## Executive Summary
 
-To evaluate `consequence-gate` against historical execution logs without requiring live production integrations, we evaluated a multi-domain synthetic trace corpus of 500 agent tool calls representing financial disbursements, database mutations, and communication blasts.
+To validate `consequence-gate`'s evaluation pipeline without requiring live database or payment provider connections, we evaluated a multi-domain synthetic trace corpus of 500 agent tool calls (financial disbursements, database mutations, and communication blasts).
 
-### Key Metrics
+### Key Metrics (500 Synthetic Traces)
 
 | Metric | Result | Description |
 |---|---|---|
-| **Total Traces Evaluated** | **500** | Full trace corpus spanning financial, database, and comms tools |
-| **True Negatives** | **294** (58.8%) | Benign operations correctly identified and passed as `ALLOW` |
-| **False Negatives Caught** | **87** (17.4%) | Schema-valid calls that breached velocity/blast limits and were intercepted (`DENY`/`STEER`/`ASK`) |
-| **False Positives Relieved** | **59** (11.8%) | Benign operations over-blocked by static regex gates that `consequence-gate` safely enabled |
-| **Other / Unclassified** | **60** (12.0%) | Ambiguous calls escalated for human review (`ASK`) |
+| **Total Traces Evaluated** | **500** | Full synthetic corpus spanning financial, database, and comms tools |
+| **Benign Pass-Through (True Negatives)** | **294** (58.8%) | Benign operations correctly identified and passed as `ALLOW` |
+| **Downstream Hazards Intercepted** | **87** (17.4%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% of hazard traces in this corpus* |
+| **Over-Blocked Operations Relieved** | **59** (11.8%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted |
+| **Ambiguous / Escalated to Human** | **60** (12.0%) | Missing context or unrecognized tools safely routed to `ASK` |
 
 ---
 
