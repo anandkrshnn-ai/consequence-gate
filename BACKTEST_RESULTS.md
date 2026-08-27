@@ -21,7 +21,7 @@ To validate `consequence-gate`'s evaluation pipeline without requiring live data
 |---|---|---|
 | **Total Traces Evaluated** | **500** | Full synthetic corpus spanning financial, database, and comms tools |
 | **Benign Pass-Through (True Negatives)** | **294** (58.8%) | Benign operations correctly identified and passed as `ALLOW` |
-| **Downstream Hazards Intercepted** | **87** (17.4%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% of hazard traces in this corpus* |
+| **Downstream Hazards Intercepted** | **87** (17.4%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% recall on this synthetic corpus* |
 | **Over-Blocked Operations Relieved** | **59** (11.8%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted |
 | **Ambiguous / Escalated to Human** | **60** (12.0%) | Missing context or unrecognized tools safely routed to `ASK` |
 
