@@ -16,48 +16,27 @@ from . import __version__
 from .backtest.harness import load_traces, run_backtest
 from .backtest.reporter import generate_report
 from .core.circuit_breaker import SteerCircuitBreaker
-from .simulators.communications import CommunicationsDeltaPredictor
-from .simulators.database import DatabaseDeltaPredictor
 from .simulators.financial import FinancialDeltaPredictor
 
 
-def create_default_evaluator():
-    """Create a multi-domain evaluator (financial, database, comms) with heuristic fallback."""
-    financial = FinancialDeltaPredictor()
-    database = DatabaseDeltaPredictor()
-    comms = CommunicationsDeltaPredictor()
-    breaker = SteerCircuitBreaker()
+def default_evaluator(trace: dict) -> str:
+    """Heuristic evaluator for CLI demo and trace analysis."""
+    tool = trace.get("tool_name", "")
+    args = trace.get("tool_args", {})
 
-    def evaluate_trace(trace: dict) -> str:
-        tool = trace.get("tool_name", "")
-        args = trace.get("tool_args", {})
-        context = trace.get("session_context", {})
+    tool_lower = tool.lower()
+    args_str = str(args).lower()
 
-        tool_lower = tool.lower()
-        args_str = str(args).lower()
+    if any(k in tool_lower for k in ("delete", "drop", "purge", "truncate")) or any(
+        k in args_str for k in ("drop ", "delete from", "truncate ", "purge")
+    ):
+        return "DENY"
+    if "transfer" in tool_lower or "pay" in tool_lower:
+        amount = args.get("amount", 0)
+        if isinstance(amount, (int, float)) and amount > 5000:
+            return "ASK"
+    return "ALLOW"
 
-        try:
-            # Route to appropriate domain simulator if applicable
-            if any(k in tool_lower for k in ("transfer", "pay", "charge", "refund", "payout", "spend")):
-                delta = financial.simulate(tool, args, context)
-                return financial.evaluate(delta, breaker).decision.value
-            if any(k in tool_lower for k in ("sql", "db", "query", "database", "table", "record", "migrate")):
-                delta = database.simulate(tool, args, context)
-                return database.evaluate(delta, breaker).decision.value
-            if any(k in tool_lower for k in ("email", "slack", "sms", "notify", "broadcast", "publish", "message")):
-                delta = comms.simulate(tool, args, context)
-                return comms.evaluate(delta, breaker).decision.value
-        except Exception:
-            pass
-
-        # Heuristic fallback for other tools
-        if any(k in tool_lower for k in ("delete", "drop", "purge", "truncate")) or any(
-            k in args_str for k in ("drop ", "delete from", "truncate ", "purge")
-        ):
-            return "DENY"
-        return "ALLOW"
-
-    return evaluate_trace
 
 
 def cmd_backtest(args):
@@ -73,8 +52,7 @@ def cmd_backtest(args):
         print(f"Error loading traces: {e}", file=sys.stderr)
         sys.exit(1)
 
-    evaluator = create_default_evaluator()
-    results = run_backtest(traces, evaluator)
+    results = run_backtest(traces, default_evaluator)
     report = generate_report(results)
 
     if getattr(args, "json", False):
@@ -98,7 +76,7 @@ def main():
         prog="consequence-gate",
         description="Speculative outcome-simulation gate & trace backtesting for AI agent tool calls.",
     )
-    parser.add_argument("-v", "--version", action="version", version=f"consequence-gate {__version__}")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
     # Backtest subcommand
