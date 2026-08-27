@@ -1,8 +1,10 @@
 # Consequence-Gate Backtest Benchmark Results
 
 > [!IMPORTANT]
-> **Synthetic Dataset Disclosure:**  
-> The traces evaluated in this report were **synthetically generated** (`examples/benchmark_traces.jsonl`) to validate the offline backtest harness, simulator logic, and four-quadrant classification pipeline end-to-end. They do **not** represent production traffic or real-world customer telemetry. A backtest against your own historical logs will reflect your specific tool schemas, environment state, and policy thresholds.
+> **Synthetic Dataset & Demo Evaluator Disclosure:**  
+> 1. **Synthetic Data:** The traces evaluated in this report were **synthetically generated** (`examples/benchmark_traces.jsonl`) to validate the offline backtest harness, simulator logic, and four-quadrant classification pipeline end-to-end. They do **not** represent production traffic or real-world customer telemetry.
+> 2. **Evaluator Scope:** The out-of-the-box CLI runner uses a standalone heuristic evaluator (`cli.default_evaluator`) calibrated specifically to demonstrate the harness mechanics without requiring live PostgreSQL instances or payment APIs. In production, users pass their configured domain simulators (`FinancialDeltaPredictor`, `DatabaseConsequencePredictor`, `CommunicationBlastPredictor`) into `run_backtest(traces, evaluator)`.
+> 3. **100% Recall Context:** The 100% recall on this synthetic corpus reflects exact matching against the known generation constraints of this sample dataset, proving harness pipeline correctness rather than generalization across unconstrained enterprise workloads.
 
 **Date:** August 27, 2026  
 **Artifact Version:** `v0.1.1`  
@@ -22,8 +24,8 @@ To validate `consequence-gate`'s evaluation pipeline without requiring live data
 | **Total Traces Evaluated** | **500** | Full synthetic corpus spanning financial, database, and comms tools |
 | **Benign Pass-Through (True Negatives)** | **252** (50.4%) | Benign operations correctly identified and passed as `ALLOW` |
 | **Downstream Hazards Intercepted** | **129** (25.8%) | Schema-valid calls that would breach velocity/blast limits, intercepted by the gate (`DENY`/`STEER`/`ASK`) — *100% recall (129/129) on this synthetic corpus* |
-| **Over-Blocked Operations Relieved** | **35** (7.0%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted |
-| **Ambiguous / Escalated to Human** | **84** (16.8%) | Missing context, high-value transfers, or unrecognized tools safely routed to `ASK` |
+| **Over-Blocked Operations Relieved** | **35** (7.0%) | Benign operations over-blocked by naive regex gates that `consequence-gate` safely permitted (35 of 52 relieved; remaining 17 conservatively flagged for human review) |
+| **Ambiguous / Escalated to Human** | **84** (16.8%) | Intentional ambiguous test cases (24 traces) + safe high-value/deletion operations conservatively escalated by the heuristic (60 traces) |
 
 ---
 
