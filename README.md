@@ -56,7 +56,8 @@ pipeline.
   evaluator, and the idempotency-locked circuit breaker.
 - `consequence_gate.integrations.strands_hook` -- **functional**: AWS Strands
   `BeforeToolCallEvent` adapter with full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle.
-- `consequence_gate.integrations.mcp_proxy` -- stub (MCP JSON-RPC wiring pending).
+- `consequence_gate.integrations.mcp_proxy` -- **functional**: MCP stdio proxy
+  intercepting `tools/call` requests, returning JSON-RPC errors or `isError=true` tool results.
 - `consequence_gate.integrations.langgraph_hook` -- stub (LangGraph node pending).
 - `consequence_gate.backtest` -- offline JSONL trace replay harness and
   four-quadrant FP/FN/TN report generator, for evaluating this layer
@@ -78,7 +79,6 @@ python examples/run_backtest_demo.py
 from consequence_gate.integrations.strands_hook import create_financial_gate_hook
 from strands.agents import Agent
 
-# Create a financial gate hook with your policy thresholds
 hook = create_financial_gate_hook(
     daily_tier_limit_inr=25000.0,
     instant_wire_threshold=10000.0,
@@ -89,15 +89,43 @@ hook = create_financial_gate_hook(
     },
 )
 
-# Attach to your Strands agent
 agent = Agent(hooks=[hook])
-
-# Now every tool call is intercepted:
-# - ALLOW: executes normally
-# - DENY: blocked with error message
-# - ASK: blocked, requires human approval
-# - STEER: blocked with guidance toward safer alternative
 response = agent("Process this claim for 50,000 INR")
+```
+
+### MCP Proxy Integration
+
+Run as a standalone proxy in front of any MCP server:
+
+```bash
+# Financial disbursement gate
+python -m consequence_gate.integrations.examples.run_mcp_proxy financial \\
+    --downstream-command "npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb" \\
+    --daily-tier-limit 25000 \\
+    --instant-wire-threshold 10000
+
+# Database deletion gate
+python -m consequence_gate.integrations.examples.run_mcp_proxy database \\
+    --downstream-command "npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb" \\
+    --max-autonomous-delete-rows 100
+
+# Communications blast gate
+python -m consequence_gate.integrations.examples.run_mcp_proxy communications \\
+    --downstream-command "npx -y @modelcontextprotocol/server-sendgrid" \\
+    --max-autonomous-recipients 10000
+```
+
+Then configure your MCP client (Claude Desktop, Cursor, Windsurf) to use the proxy:
+
+```json
+{
+  "mcpServers": {
+    "my-consequence-gate": {
+      "command": "python",
+      "args": ["-m", "consequence_gate.integrations.examples.run_mcp_proxy", "financial", "--downstream-command", "npx -y @modelcontextprotocol/server-postgres postgresql://localhost/mydb"]
+    }
+  }
+}
 ```
 
 ### Database Deletion Gate (Strands)
@@ -136,20 +164,16 @@ hook = create_communication_gate_hook(
 )
 
 agent = Agent(hooks=[hook])
-
-# Blocks compliance violations (no unsubscribe suppression)
-# Steers high-volume sends to canary cohorts
-# Steers high-bounce canaries to list hygiene
 ```
 
 ## Decision Matrix
 
-| Decision | Agent sees | Use case |
-|----------|------------|----------|
-| `ALLOW` | Tool executes normally | Projected outcome within safe bounds |
-| `DENY` | `BLOCKED: <reason>` | Critical breach (e.g., 10x over threshold + irreversible, compliance violation) |
-| `ASK` | `ESCALATION_REQUIRED: <reason>` | Low confidence, or moderate breach requiring human review |
-| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative: <tool> with args <args>` | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete, canary cohort) |
+| Decision | Agent sees (Strands) | Agent sees (MCP) | Use case |
+|----------|---------------------|------------------|----------|
+| `ALLOW` | Tool executes normally | Forwarded to downstream MCP server | Projected outcome within safe bounds |
+| `DENY` | `BLOCKED: <reason>` | JSON-RPC error (code=-32603) | Critical breach (e.g., 10x over threshold + irreversible, compliance violation) |
+| `ASK` | `ESCALATION_REQUIRED: <reason>` | Tool result with `isError=true` | Low confidence, or moderate breach requiring human review |
+| `STEER` | `STEER_GUIDANCE: <guidance>\nSuggested alternative...` | Tool result with `isError=true` + structured guidance | Over threshold but safe alternative exists (e.g., staged disbursement, soft delete, canary cohort) |
 
 ## Backtest Workflow
 
@@ -170,7 +194,7 @@ execution traces:
 - **Database simulator**: functional with unit tests (EXPLAIN-based row estimation, recursive FK cascade walk)
 - **Communications simulator**: functional with unit tests (blast radius, unsubscribe compliance, canary cohorts, reputation impact)
 - **Strands integration**: functional with unit tests (full `ALLOW`/`DENY`/`ASK`/`STEER` lifecycle)
-- **MCP integration**: stub pending JSON-RPC wiring
+- **MCP integration**: functional with unit tests (stdio transport, JSON-RPC error handling)
 - **LangGraph integration**: stub pending node implementation
 
 ## License
