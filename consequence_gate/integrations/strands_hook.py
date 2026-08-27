@@ -18,8 +18,16 @@ Design contract (from project history):
 from typing import Any, Callable, Dict, Optional
 import json
 
-from strands.hooks import BeforeToolCallEvent
-from strands.hooks.events import HookProvider, HookRegistry
+try:
+    from strands.hooks import BeforeToolCallEvent
+    from strands.hooks.events import HookProvider, HookRegistry
+except ImportError:
+    class HookProvider:  # type: ignore[no-redef]
+        """Fallback base class when strands-agents is not installed."""
+        pass
+
+    BeforeToolCallEvent = Any  # type: ignore[misc,assignment]
+    HookRegistry = Any  # type: ignore[misc,assignment]
 
 from ..core.models import GateDecision, EvaluationResult
 from ..core.circuit_breaker import SteerCircuitBreaker

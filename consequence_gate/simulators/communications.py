@@ -103,8 +103,7 @@ class OutboundCommunicationSimulator:
             segment_breakdown = {"unknown": total_recipients}
 
         # Unsubscribe suppression check
-        recent_unsubscribes = context.get("recent_unsubscribes", set())
-        has_suppression = suppress_unsubscribes and len(recent_unsubscribes) > 0
+        has_suppression = bool(suppress_unsubscribes)
         recipients_without_suppression = total_recipients if not has_suppression else 0
 
         # Canary cohort analysis
@@ -118,7 +117,7 @@ class OutboundCommunicationSimulator:
             predicted_complaint = 0.0
 
         # Sender reputation impact
-        reputation_impact = -(total_recipients * predicted_complaint) / 10000.0
+        reputation_impact = -(total_recipients * predicted_complaint) / 5000.0
         if channel == "sms":
             reputation_impact *= 1.5
 
@@ -193,7 +192,7 @@ class OutboundCommunicationSimulator:
                 reason=f"COMPLIANCE VIOLATION: Cannot send to {delta.total_recipients} recipients without unsubscribe suppression (CAN-SPAM/GDPR).",
             )
 
-        if delta.sender_reputation_impact < -1.0:
+        if delta.sender_reputation_impact < -0.5:
             return EvaluationResult(
                 decision=GateDecision.DENY,
                 confidence=delta.confidence,

@@ -13,7 +13,6 @@ Tests cover:
 from unittest.mock import MagicMock
 import pytest
 
-from strands.hooks.events import BeforeToolCallEvent
 
 from consequence_gate.integrations.strands_hook import (
     ConsequenceGateHook,
@@ -228,8 +227,17 @@ def test_retry_cap_escalates_after_max():
 
     breaker = SteerCircuitBreaker(max_retries=2)
 
+    def evaluator_fn(delta, breaker):
+        base_steer = {
+            "guidance": "Exceeds balance limit. Use staged payout.",
+            "suggested_tool": "create_staged_disbursement",
+            "suggested_args": {"immediate_amount": 25000},
+        }
+        return breaker.resolve("c6", delta.confidence, base_steer)
+
     hook = ConsequenceGateHook(
         simulator_fn=simulator_fn,
+        evaluator_fn=evaluator_fn,
         circuit_breaker=breaker,
     )
 
