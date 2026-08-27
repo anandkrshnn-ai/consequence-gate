@@ -31,12 +31,19 @@ jobs:
         run: |
           python -c "
           from consequence_gate import __version__
-          import tomllib
-          with open('pyproject.toml', 'rb') as f:
-              pyproj_ver = tomllib.load(f)['project']['version']
+          with open('pyproject.toml', 'r', encoding='utf-8') as f:
+              for line in f:
+                  if line.strip().startswith('version ='):
+                      pyproj_ver = line.split('=')[1].strip().strip('\"\'')
+                      break
           assert __version__ == pyproj_ver, f'Version mismatch: __init__.py ({__version__}) != pyproject.toml ({pyproj_ver})'
           print(f'✓ Version verified: {__version__}')
           "
+
+      - name: Run linter and formatter checks
+        run: |
+          ruff check .
+          ruff format --check .
 
       - name: Run pytest with coverage
         run: |
@@ -45,4 +52,5 @@ jobs:
       - name: Verify CLI entrypoint
         run: |
           consequence-gate --version
-          consequence-gate backtest examples/backtest_sample_traces.jsonl --json
+          consequence-gate backtest examples/benchmark_traces.jsonl
+          consequence-gate backtest examples/benchmark_traces.jsonl --json
