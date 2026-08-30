@@ -6,6 +6,8 @@
 [![Tests](https://img.shields.io/badge/tests-30%20passed-success.svg)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-core%2090%25%2B-brightgreen.svg)](tests/)
 
+**[Try the Interactive Demo ⚡](https://consequence-gate-demo.vercel.app/)**
+
 A speculative outcome-simulation layer for AI agent tool calls. It sits
 **upstream** of static runtime access gates (AgentWall, AWS Strands
 `BeforeToolCallEvent`, MCP proxies, Prisma AIRS) and asks a different
