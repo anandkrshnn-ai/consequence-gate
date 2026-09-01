@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "consequence-gate"
-version = "0.1.1"
+version = "0.1.2"
 description = "Speculative outcome-simulation layer for AI agent tool calls — predicts consequence (blast radius, irreversibility, velocity) before execution and steers agents toward safer alternatives."
 readme = "README.md"
 license = {text = "Apache-2.0"}
