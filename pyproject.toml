@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "consequence-gate"
-version = "0.1.2"
+version = "0.1.3"
 description = "Speculative outcome-simulation layer for AI agent tool calls — predicts consequence (blast radius, irreversibility, velocity) before execution and steers agents toward safer alternatives."
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -34,7 +34,10 @@ keywords = [
     "agent-security",
     "runtime-governance",
 ]
-dependencies = []
+dependencies = [
+    "pydantic>=2.5.0",
+    "cryptography>=42.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
