@@ -15,6 +15,7 @@ from typing import Any
 from ..core.circuit_breaker import SteerCircuitBreaker
 from ..core.evidence import ConsequenceNotary, attach_evidence
 from ..core.models import EvaluationResult, GateDecision
+from ..core.thresholds import MIN_CONFIDENCE_AUTOPASS
 
 
 @dataclass
@@ -89,7 +90,11 @@ class DataDeletionSimulator:
         table = args.get("table", "unknown")
         filters = args.get("filters", {})
         force_hard_delete = args.get("hard_delete", False)
-        natural_key = f"{table}:{sorted(filters.items())}"
+        
+        if not table or table == "unknown" or not filters:
+            natural_key = ""
+        else:
+            natural_key = f"{table}:{sorted(filters.items())}"
 
         table_stats = context.get("table_metadata", {}).get(table, {})
         total_table_rows = table_stats.get("total_rows", 0)
@@ -106,6 +111,8 @@ class DataDeletionSimulator:
         has_cascades = len(cascade_tables) > 0
         irreversibility = 1.0 if force_hard_delete else 0.2
         confidence = 0.90 if self.db_conn is not None else 0.40
+        if not natural_key:
+            confidence = 0.0
 
         side_effects = []
         if estimated_rows > self.max_autonomous_delete_rows:
@@ -137,7 +144,18 @@ class DataDeletionSimulator:
     def evaluate(
         self, delta: DeletionBlastDelta, circuit_breaker: SteerCircuitBreaker
     ) -> EvaluationResult:
-        if delta.confidence < 0.70:
+        if not delta.natural_key:
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Missing explicit natural key (valid table and filters required).",
+                ),
+                delta,
+                self.notary,
+            )
+
+        if delta.confidence < MIN_CONFIDENCE_AUTOPASS:
             return attach_evidence(
                 EvaluationResult(
                     decision=GateDecision.ASK,

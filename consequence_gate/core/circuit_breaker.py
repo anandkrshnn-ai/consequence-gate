@@ -18,6 +18,7 @@ import json
 from typing import Any
 
 from .models import EvaluationResult, GateDecision
+from .store import Store, InMemoryStore
 
 
 def _normalize_payload(val: Any) -> Any:
@@ -43,10 +44,9 @@ def _hash_payload(payload: dict[str, Any]) -> str:
 
 
 class SteerCircuitBreaker:
-    def __init__(self, max_retries: int = 2):
+    def __init__(self, max_retries: int = 2, store: Store | None = None):
         self.max_retries = max_retries
-        self._attempts: dict[str, int] = {}
-        self._responses: dict[str, EvaluationResult] = {}
+        self.store = store or InMemoryStore()
 
     def token_for(self, natural_key: str) -> str:
         return f"steer_{natural_key}"
@@ -62,10 +62,11 @@ class SteerCircuitBreaker:
         payload_hash = _hash_payload(payload)
         response_key = f"{attempt_key}_{payload_hash}"
 
-        if response_key in self._responses:
-            return self._responses[response_key]
+        cached = self.store.get_response(response_key)
+        if cached is not None:
+            return cached
 
-        attempt = self._attempts.get(attempt_key, 0)
+        attempt = self.store.get_attempts(attempt_key)
 
         if attempt >= self.max_retries:
             result = EvaluationResult(
@@ -73,11 +74,11 @@ class SteerCircuitBreaker:
                 confidence=confidence,
                 reason=f"Steer circuit breaker tripped ({attempt}/{self.max_retries}). Escalating to human.",
             )
-            self._attempts[attempt_key] = attempt + 1
-            self._responses[response_key] = result
+            self.store.increment_attempts(attempt_key)
+            self.store.set_response(response_key, result)
             return result
 
-        self._attempts[attempt_key] = attempt + 1
+        self.store.increment_attempts(attempt_key)
         base_steer.setdefault("suggested_args", {})["idempotency_key"] = attempt_key
 
         result = EvaluationResult(
@@ -86,5 +87,5 @@ class SteerCircuitBreaker:
             reason=f"Steered to safer path (attempt {attempt + 1}/{self.max_retries}).",
             steer_payload=base_steer,
         )
-        self._responses[response_key] = result
+        self.store.set_response(response_key, result)
         return result
