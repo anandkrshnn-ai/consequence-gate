@@ -159,7 +159,7 @@ def verify_envelope(envelope: ConsequenceEvidenceEnvelope) -> bool:
     try:
         public = Ed25519PublicKey.from_public_bytes(_b64d(envelope.public_key))
         public.verify(_b64d(envelope.signature), payload)
-    except (InvalidSignature, ValueError, Exception):
+    except (InvalidSignature, ValueError):
         return False
     return True
 

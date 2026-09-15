@@ -82,11 +82,6 @@ def create_consequence_middleware(
         state = request.state or {}
         context = context_fn(state)
 
-        # Extract natural key for idempotency
-        arguments.get("claim_id") or arguments.get(
-            "transaction_ref"
-        ) or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
-
         # Run simulation + evaluation
         delta = simulator_fn(tool_name, arguments, context)
         result = evaluator_fn(delta, breaker)

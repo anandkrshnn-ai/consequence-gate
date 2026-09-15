@@ -106,12 +106,6 @@ class ConsequenceGateHook(HookProvider):
         args = event.tool_use.get("input", {})
         context = self.context_provider(event)
 
-        # Extract natural key from args (domain-specific; financial uses claim_id,
-        # database uses table+filter hash, etc.)
-        args.get("claim_id") or args.get(
-            "transaction_ref"
-        ) or f"{tool_name}:{json.dumps(args, sort_keys=True)}"
-
         # Run simulation + evaluation
         delta = self.simulator_fn(tool_name, args, context)
 
