@@ -80,13 +80,7 @@ class MCPConsequenceProxy:
 
         self.downstream_process: subprocess.Popen | None = None
 
-    def _extract_natural_key(self, tool_name: str, arguments: dict[str, Any]) -> str:
-        """Extract stable natural key for idempotency."""
-        return (
-            arguments.get("claim_id")
-            or arguments.get("transaction_ref")
-            or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
-        )
+
 
     def _intercept_tools_call(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -98,7 +92,6 @@ class MCPConsequenceProxy:
         arguments = params.get("arguments", {})
         context = self.context_provider(params)
 
-        self._extract_natural_key(tool_name, arguments)
         delta = self.simulator_fn(tool_name, arguments, context)
         result = self.evaluator_fn(delta, self.circuit_breaker)
 
@@ -146,8 +139,8 @@ class MCPConsequenceProxy:
 
         return None  # Should not reach here
 
-    def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Forward request to downstream MCP server and return response."""
+    def _forward_to_downstream(self, request: dict[str, Any], expect_response: bool = True) -> dict[str, Any] | None:
+        """Forward request to downstream MCP server and return response if expected."""
         if self.downstream_process is None:
             self.downstream_process = subprocess.Popen(
                 self.downstream_command,
@@ -163,6 +156,9 @@ class MCPConsequenceProxy:
         self.downstream_process.stdin.write(request_line)
         self.downstream_process.stdin.flush()
 
+        if not expect_response:
+            return None
+
         # Read response from downstream stdout
         response_line = self.downstream_process.stdout.readline()
         return json.loads(response_line)
@@ -177,8 +173,10 @@ class MCPConsequenceProxy:
 
         method = request.get("method")
         if method != "tools/call":
-            # Not a tool call - forward as-is
-            return None
+            # Not a tool call - forward to downstream
+            is_notification = "id" not in request
+            response = self._forward_to_downstream(request, expect_response=not is_notification)
+            return json.dumps(response) if response is not None else None
 
         # Intercept tools/call
         intercepted_response = self._intercept_tools_call(request)

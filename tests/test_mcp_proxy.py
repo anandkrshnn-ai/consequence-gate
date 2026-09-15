@@ -32,12 +32,16 @@ def test_non_tools_call_passes_through():
         evaluator_fn=evaluator_fn,
     )
 
+    expected_response = {"jsonrpc": "2.0", "id": 1, "result": {}}
+    proxy._forward_to_downstream = MagicMock(return_value=expected_response)
+
     # resources/list request (not tools/call)
     request = {"jsonrpc": "2.0", "id": 1, "method": "resources/list"}
     result = proxy._process_line(json.dumps(request))
 
-    # Should return None (forward to downstream)
-    assert result is None
+    # Should forward to downstream and return the mocked response
+    proxy._forward_to_downstream.assert_called_once_with(request, expect_response=True)
+    assert result == json.dumps(expected_response)
 
 
 def test_tools_call_allowed_forwards():
