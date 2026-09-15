@@ -43,13 +43,17 @@ def demo_evaluator(trace: dict) -> str:
         if "amount" in args:
             amount_raw = args["amount"]
             amount_str = str(amount_raw).strip().replace(",", "")
-            
-            # NOTE: This parsing is adjusted to handle a European-style thousands-separator format 
-            # (e.g. '15.000') found in this specific test corpus. This heuristic has not been 
+
+            # NOTE: This parsing is adjusted to handle a European-style thousands-separator format
+            # (e.g. '15.000') found in this specific test corpus. This heuristic has not been
             # validated against arbitrary real-world amount formats.
-            if "." in amount_str and len(amount_str.split(".")[-1]) == 3 and amount_str.count(".") == 1:
+            if (
+                "." in amount_str
+                and len(amount_str.split(".")[-1]) == 3
+                and amount_str.count(".") == 1
+            ):
                 amount_str = amount_str.replace(".", "")
-                
+
             try:
                 amount = float(amount_str)
             except (ValueError, TypeError):
@@ -58,15 +62,15 @@ def demo_evaluator(trace: dict) -> str:
             # If a financial action doesn't have an amount, we skip the amount-based checks
             # or could default to an ASK if it's a tool that requires it.
             amount = None
-            
+
         spend = ctx.get("account_rolling_24h_spend", 0)
         tier_limit = ctx.get("tier_limit", 25000)
-        
+
         if amount is not None:
             # Deny negative or zero amount claims (malformed input / negative-value injection)
             if amount <= 0:
                 return "DENY"
-                
+
             if spend + amount > tier_limit:
                 return "DENY"
             if amount > 5000:
@@ -126,7 +130,9 @@ def cmd_backtest(args):
         print(f"Over-Blocked Relieved:       {report['overblocked_relieved']}")
         print(f"Ambiguous / Missed (FN):     {report['other']}")
         print("-" * 66)
-        print(f"Hazard Interception Share:   {report.get('hazard_interception_rate', report.get('false_negative_rate', 0)):.2%}")
+        print(
+            f"Hazard Interception Share:   {report.get('hazard_interception_rate', report.get('false_negative_rate', 0)):.2%}"
+        )
         print(f"False Positive Rate:         {report.get('false_positive_rate', 0):.2%}")
         print("=" * 66)
 
