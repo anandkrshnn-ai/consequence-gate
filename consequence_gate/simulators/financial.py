@@ -7,7 +7,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.evidence import ConsequenceNotary, attach_evidence
 from ..core.models import EvaluationResult, GateDecision
+from ..core.thresholds import MIN_CONFIDENCE_AUTOPASS
 
 
 @dataclass
@@ -29,6 +31,7 @@ class FinancialDeltaPredictor:
     ):
         self.daily_tier_limit_inr = daily_tier_limit_inr
         self.instant_wire_threshold = instant_wire_threshold
+        self.notary: ConsequenceNotary | None = None
 
     def simulate(
         self, tool_name: str, args: dict[str, Any], context: dict[str, Any]
@@ -36,7 +39,7 @@ class FinancialDeltaPredictor:
         amount = float(args.get("amount", 0.0))
         currency = args.get("currency", "INR").upper()
         payout_method = args.get("payout_method", "standard_ach")
-        natural_key = args.get("claim_id") or args.get("transaction_ref") or f"{tool_name}:{amount}"
+        natural_key = args.get("claim_id") or args.get("transaction_ref") or args.get("idempotency_key") or ""
 
         conversion_rate = (
             1.0 if currency == "INR" else context.get("exchange_rates", {}).get(currency, 0.0)
@@ -50,7 +53,15 @@ class FinancialDeltaPredictor:
 
         has_verified_kyc = context.get("kyc_verified", False)
         has_fresh_balance = "account_rolling_24h_spend" in context
-        confidence = 0.95 if (has_verified_kyc and has_fresh_balance) else 0.45
+        if has_verified_kyc and has_fresh_balance:
+            confidence = 0.95
+        elif has_verified_kyc or has_fresh_balance:
+            confidence = 0.80
+        else:
+            confidence = 0.45
+            
+        if not natural_key:
+            confidence = 0.0
 
         side_effects = []
         if projected_24h_spend > self.daily_tier_limit_inr:
@@ -75,21 +86,43 @@ class FinancialDeltaPredictor:
     def evaluate(
         self, delta: FinancialStateDelta, circuit_breaker: SteerCircuitBreaker
     ) -> EvaluationResult:
-        if delta.confidence < 0.70:
-            return EvaluationResult(
-                decision=GateDecision.ASK,
-                confidence=delta.confidence,
-                reason="Low simulation confidence: stale ledger or unverified KYC context.",
+        if not delta.natural_key:
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Missing explicit natural key (claim_id, transaction_ref, or idempotency_key).",
+                ),
+                delta,
+                self.notary,
+            )
+
+        if delta.confidence < MIN_CONFIDENCE_AUTOPASS:
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Low context-completeness score: missing KYC or fresh balance context.",
+                ),
+                delta,
+                self.notary,
             )
 
         if (
             delta.rolling_24h_exposure_inr > (delta.policy_tier_limit_inr * 2.0)
             and delta.irreversibility_score >= 0.9
         ):
-            return EvaluationResult(
-                decision=GateDecision.DENY,
-                confidence=delta.confidence,
-                reason=f"Projected delta INR {delta.projected_net_delta_inr:,.2f} critically breaches velocity envelope.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.DENY,
+                    confidence=delta.confidence,
+                    reason=(
+                        f"Projected delta INR {delta.projected_net_delta_inr:,.2f} "
+                        "critically breaches velocity envelope."
+                    ),
+                ),
+                delta,
+                self.notary,
             )
 
         if delta.rolling_24h_exposure_inr > delta.policy_tier_limit_inr:
@@ -110,10 +143,20 @@ class FinancialDeltaPredictor:
                     "escrow_amount": delta.projected_net_delta_inr - max_allowed_instant,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return attach_evidence(
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
+                delta,
+                self.notary,
+            )
 
-        return EvaluationResult(
-            decision=GateDecision.ALLOW,
-            confidence=delta.confidence,
-            reason="Projected balance delta is within safe autonomous operational boundary.",
+        return attach_evidence(
+            EvaluationResult(
+                decision=GateDecision.ALLOW,
+                confidence=delta.confidence,
+                reason="Projected balance delta is within safe autonomous operational boundary.",
+            ),
+            delta,
+            self.notary,
         )

@@ -221,6 +221,7 @@ def test_retry_cap_escalates_after_max():
             confidence=0.90,
             numeric_deltas={"balance": -50000},
             irreversibility_score=0.8,
+            proposed_args=args,
         )
 
     breaker = SteerCircuitBreaker(max_retries=2)
@@ -231,7 +232,7 @@ def test_retry_cap_escalates_after_max():
             "suggested_tool": "create_staged_disbursement",
             "suggested_args": {"immediate_amount": 25000},
         }
-        return breaker.resolve("c6", delta.confidence, base_steer)
+        return breaker.resolve("c6", delta.proposed_args, delta.confidence, base_steer)
 
     hook = ConsequenceGateHook(
         simulator_fn=simulator_fn,
@@ -240,10 +241,14 @@ def test_retry_cap_escalates_after_max():
     )
 
     # First two calls: STEER
-    for _i in range(2):
+    for i in range(2):
         event = MockBeforeToolCallEvent(
             "process_claim",
-            {"amount": 50000, "claim_id": "c6"},  # same natural key
+            {
+                "amount": 50000,
+                "claim_id": "c6",
+                "mod": i,
+            },  # change payload to avoid idempotency cache
         )
         hook.intercept(event)
         assert "STEER_GUIDANCE:" in event.cancel_tool
@@ -251,7 +256,7 @@ def test_retry_cap_escalates_after_max():
     # Third call with same natural key: circuit breaker trips -> ASK
     event = MockBeforeToolCallEvent(
         "process_claim",
-        {"amount": 50000, "claim_id": "c6"},
+        {"amount": 50000, "claim_id": "c6", "mod": 3},
     )
     hook.intercept(event)
 

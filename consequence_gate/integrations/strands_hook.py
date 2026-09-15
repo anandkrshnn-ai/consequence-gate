@@ -19,6 +19,9 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from ..core.evidence import ConsequenceNotary
+from ..core.store import Store
+
 try:
     from strands.hooks import BeforeToolCallEvent
     from strands.hooks.events import HookProvider, HookRegistry
@@ -64,6 +67,8 @@ class ConsequenceGateHook(HookProvider):
         evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult] | None = None,
         circuit_breaker: SteerCircuitBreaker | None = None,
         context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
+        store: Store | None = None,
+        notary: ConsequenceNotary | None = None,
     ):
         """
         Args:
@@ -73,11 +78,15 @@ class ConsequenceGateHook(HookProvider):
             circuit_breaker: SteerCircuitBreaker instance (default: max_retries=2)
             context_provider: function(event) -> context dict for simulation
                               If None, uses a minimal default context.
+            store: Optional Store instance for durable idempotency tracking.
+            notary: Optional ConsequenceNotary for cryptographic evidence.
         """
         self.simulator_fn = simulator_fn
         self.evaluator_fn = evaluator_fn
-        self.circuit_breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2)
+        self.circuit_breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2, store=store)
         self.context_provider = context_provider or self._default_context
+        self.store = store
+        self.notary = notary
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
         registry.add_callback(BeforeToolCallEvent, self.intercept)
@@ -96,12 +105,6 @@ class ConsequenceGateHook(HookProvider):
         tool_name = event.tool_use.get("name", "unknown")
         args = event.tool_use.get("input", {})
         context = self.context_provider(event)
-
-        # Extract natural key from args (domain-specific; financial uses claim_id,
-        # database uses table+filter hash, etc.)
-        args.get("claim_id") or args.get(
-            "transaction_ref"
-        ) or f"{tool_name}:{json.dumps(args, sort_keys=True)}"
 
         # Run simulation + evaluation
         delta = self.simulator_fn(tool_name, args, context)
@@ -164,6 +167,8 @@ def create_financial_gate_hook(
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
     context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a financial-disbursement gate hook.
@@ -182,7 +187,8 @@ def create_financial_gate_hook(
         daily_tier_limit_inr=daily_tier_limit_inr,
         instant_wire_threshold=instant_wire_threshold,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    predictor.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return predictor.evaluate(delta, circuit_breaker)
@@ -192,6 +198,8 @@ def create_financial_gate_hook(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
 
 
@@ -200,6 +208,8 @@ def create_database_gate_hook(
     db_conn=None,
     max_retries: int = 2,
     context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a database-deletion gate hook.
@@ -218,7 +228,8 @@ def create_database_gate_hook(
         max_autonomous_delete_rows=max_autonomous_delete_rows,
         db_conn=db_conn,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -228,4 +239,6 @@ def create_database_gate_hook(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )

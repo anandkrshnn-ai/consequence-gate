@@ -18,7 +18,9 @@ from enum import Enum
 from typing import Any
 
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.evidence import ConsequenceNotary, attach_evidence
 from ..core.models import EvaluationResult, GateDecision
+from ..core.thresholds import MIN_CONFIDENCE_AUTOPASS
 
 
 class CommunicationChannel(str, Enum):
@@ -31,6 +33,7 @@ class CommunicationChannel(str, Enum):
 @dataclass
 class CommunicationBlastDelta:
     tool_name: str
+    proposed_args: dict[str, Any]
     channel: str
     total_recipients: int
     segment_breakdown: dict[str, int]
@@ -69,6 +72,7 @@ class OutboundCommunicationSimulator:
         self.canary_min_size = canary_min_size
         self.canary_max_bounce_rate = canary_max_bounce_rate
         self.canary_max_complaint_rate = canary_max_complaint_rate
+        self.notary: ConsequenceNotary | None = None
 
     def simulate(
         self,
@@ -83,7 +87,14 @@ class OutboundCommunicationSimulator:
         canary_enabled = args.get("canary_enabled", False)
         canary_size = args.get("canary_size", self.canary_min_size)
 
-        natural_key = f"{channel}:{args.get('campaign_id') or len(recipient_list)}"
+        campaign_id = args.get("campaign_id")
+        segment_id = segment_filter or args.get("segment_id")
+        
+        if not campaign_id and not segment_id:
+            natural_key = ""
+        else:
+            key_part = campaign_id or segment_id
+            natural_key = f"{channel}:{key_part}"
 
         # Calculate total recipients
         if recipient_list:
@@ -133,6 +144,8 @@ class OutboundCommunicationSimulator:
         has_segment_data = "segment_counts" in context
         has_historical_data = "historical_bounce_rate" in context
         confidence = 0.90 if (has_segment_data and has_historical_data) else 0.50
+        if not natural_key:
+            confidence = 0.0
 
         side_effects = []
         if total_recipients > self.max_autonomous_recipients:
@@ -159,6 +172,7 @@ class OutboundCommunicationSimulator:
 
         return CommunicationBlastDelta(
             tool_name=tool_name,
+            proposed_args=args,
             channel=channel,
             total_recipients=total_recipients,
             segment_breakdown=segment_breakdown,
@@ -178,25 +192,48 @@ class OutboundCommunicationSimulator:
         delta: CommunicationBlastDelta,
         circuit_breaker: SteerCircuitBreaker,
     ) -> EvaluationResult:
-        if delta.confidence < 0.60:
-            return EvaluationResult(
-                decision=GateDecision.ASK,
-                confidence=delta.confidence,
-                reason="Insufficient context (missing segment or historical data) to evaluate send safely.",
+        if not delta.natural_key:
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Missing explicit natural key (campaign_id or segment_id required).",
+                ),
+                delta,
+                self.notary,
+            )
+
+        if delta.confidence < MIN_CONFIDENCE_AUTOPASS:
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Insufficient context (missing segment or historical data) to evaluate send safely.",
+                ),
+                delta,
+                self.notary,
             )
 
         if not delta.has_unsubscribe_suppression and delta.total_recipients > 0:
-            return EvaluationResult(
-                decision=GateDecision.DENY,
-                confidence=delta.confidence,
-                reason=f"COMPLIANCE VIOLATION: Cannot send to {delta.total_recipients} recipients without unsubscribe suppression (CAN-SPAM/GDPR).",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.DENY,
+                    confidence=delta.confidence,
+                    reason=f"COMPLIANCE VIOLATION: Cannot send to {delta.total_recipients} recipients without unsubscribe suppression (CAN-SPAM/GDPR).",
+                ),
+                delta,
+                self.notary,
             )
 
         if delta.sender_reputation_impact < -0.5:
-            return EvaluationResult(
-                decision=GateDecision.DENY,
-                confidence=delta.confidence,
-                reason=f"Critical sender reputation risk: {delta.sender_reputation_impact:.2f} impact score would severely damage deliverability.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.DENY,
+                    confidence=delta.confidence,
+                    reason=f"Critical sender reputation risk: {delta.sender_reputation_impact:.2f} impact score would severely damage deliverability.",
+                ),
+                delta,
+                self.notary,
             )
 
         if delta.total_recipients > self.max_autonomous_recipients:
@@ -217,7 +254,13 @@ class OutboundCommunicationSimulator:
                     "idempotency_key": None,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return attach_evidence(
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
+                delta,
+                self.notary,
+            )
 
         if delta.canary_cohort_size > 0 and (
             delta.predicted_bounce_rate > self.canary_max_bounce_rate
@@ -236,12 +279,22 @@ class OutboundCommunicationSimulator:
                     "reengagement_threshold_days": 90,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return attach_evidence(
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
+                delta,
+                self.notary,
+            )
 
-        return EvaluationResult(
-            decision=GateDecision.ALLOW,
-            confidence=delta.confidence,
-            reason=f"Send to {delta.total_recipients} recipients is within safe autonomous operational boundary.",
+        return attach_evidence(
+            EvaluationResult(
+                decision=GateDecision.ALLOW,
+                confidence=delta.confidence,
+                reason=f"Send to {delta.total_recipients} recipients is within safe autonomous operational boundary.",
+            ),
+            delta,
+            self.notary,
         )
 
 
@@ -253,6 +306,8 @@ def create_communication_gate_hook(
     canary_max_complaint_rate: float = 0.01,
     max_retries: int = 2,
     context_provider=None,
+    store=None,
+    notary=None,
 ):
     """
     Factory for creating a communication gate simulator.
@@ -277,7 +332,8 @@ def create_communication_gate_hook(
         canary_max_bounce_rate=canary_max_bounce_rate,
         canary_max_complaint_rate=canary_max_complaint_rate,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -287,4 +343,6 @@ def create_communication_gate_hook(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
