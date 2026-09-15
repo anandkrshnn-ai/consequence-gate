@@ -178,7 +178,9 @@ class DataDeletionSimulator:
                 },
             }
             return attach_evidence(
-                circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer),
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
                 delta,
                 self.notary,
             )

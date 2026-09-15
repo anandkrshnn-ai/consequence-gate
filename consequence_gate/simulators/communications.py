@@ -31,6 +31,7 @@ class CommunicationChannel(str, Enum):
 @dataclass
 class CommunicationBlastDelta:
     tool_name: str
+    proposed_args: dict[str, Any]
     channel: str
     total_recipients: int
     segment_breakdown: dict[str, int]
@@ -159,6 +160,7 @@ class OutboundCommunicationSimulator:
 
         return CommunicationBlastDelta(
             tool_name=tool_name,
+            proposed_args=args,
             channel=channel,
             total_recipients=total_recipients,
             segment_breakdown=segment_breakdown,
@@ -217,7 +219,9 @@ class OutboundCommunicationSimulator:
                     "idempotency_key": None,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return circuit_breaker.resolve(
+                delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+            )
 
         if delta.canary_cohort_size > 0 and (
             delta.predicted_bounce_rate > self.canary_max_bounce_rate
@@ -236,7 +240,9 @@ class OutboundCommunicationSimulator:
                     "reengagement_threshold_days": 90,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return circuit_breaker.resolve(
+                delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+            )
 
         return EvaluationResult(
             decision=GateDecision.ALLOW,
