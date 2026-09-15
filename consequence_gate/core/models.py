@@ -34,3 +34,4 @@ class EvaluationResult:
     confidence: float
     reason: str
     steer_payload: dict[str, Any] | None = None
+    evidence: Any | None = None

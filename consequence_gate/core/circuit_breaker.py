@@ -13,9 +13,33 @@ Design contract (see project history / design notes):
   loop-thrashing, independent of guidance quality.
 """
 
+import hashlib
+import json
 from typing import Any
 
 from .models import EvaluationResult, GateDecision
+
+
+def _normalize_payload(val: Any) -> Any:
+    """Normalizes payload structures to ensure consistent hashing."""
+    if isinstance(val, dict):
+        return {str(k): _normalize_payload(v) for k, v in val.items()}
+    elif isinstance(val, (list, tuple, set)):
+        return [_normalize_payload(v) for v in val]
+    elif isinstance(val, float):
+        # Round floats to prevent precision mismatch from causing distinct hashes
+        return round(val, 4)
+    elif val is None or isinstance(val, (int, str, bool)):
+        return val
+    else:
+        # Fallback to string representation for non-native types (e.g. datetime)
+        return str(val)
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    normalized = _normalize_payload(payload)
+    serialized = json.dumps(normalized, sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
 class SteerCircuitBreaker:
@@ -28,14 +52,20 @@ class SteerCircuitBreaker:
         return f"steer_{natural_key}"
 
     def resolve(
-        self, natural_key: str, confidence: float, base_steer: dict[str, Any]
+        self,
+        natural_key: str,
+        payload: dict[str, Any],
+        confidence: float,
+        base_steer: dict[str, Any],
     ) -> EvaluationResult:
-        token = self.token_for(natural_key)
+        attempt_key = self.token_for(natural_key)
+        payload_hash = _hash_payload(payload)
+        response_key = f"{attempt_key}_{payload_hash}"
 
-        if token in self._responses:
-            return self._responses[token]
+        if response_key in self._responses:
+            return self._responses[response_key]
 
-        attempt = self._attempts.get(token, 0)
+        attempt = self._attempts.get(attempt_key, 0)
 
         if attempt >= self.max_retries:
             result = EvaluationResult(
@@ -43,11 +73,12 @@ class SteerCircuitBreaker:
                 confidence=confidence,
                 reason=f"Steer circuit breaker tripped ({attempt}/{self.max_retries}). Escalating to human.",
             )
-            self._responses[token] = result
+            self._attempts[attempt_key] = attempt + 1
+            self._responses[response_key] = result
             return result
 
-        self._attempts[token] = attempt + 1
-        base_steer.setdefault("suggested_args", {})["idempotency_key"] = token
+        self._attempts[attempt_key] = attempt + 1
+        base_steer.setdefault("suggested_args", {})["idempotency_key"] = attempt_key
 
         result = EvaluationResult(
             decision=GateDecision.STEER,
@@ -55,4 +86,5 @@ class SteerCircuitBreaker:
             reason=f"Steered to safer path (attempt {attempt + 1}/{self.max_retries}).",
             steer_payload=base_steer,
         )
+        self._responses[response_key] = result
         return result

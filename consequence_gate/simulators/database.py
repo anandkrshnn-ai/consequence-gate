@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.evidence import ConsequenceNotary, attach_evidence
 from ..core.models import EvaluationResult, GateDecision
 
 
@@ -80,6 +81,7 @@ class DataDeletionSimulator:
     def __init__(self, max_autonomous_delete_rows: int = 100, db_conn=None):
         self.max_autonomous_delete_rows = max_autonomous_delete_rows
         self.db_conn = db_conn  # optional live connection for EXPLAIN / FK introspection
+        self.notary: ConsequenceNotary | None = None
 
     def simulate(
         self, tool_name: str, args: dict[str, Any], context: dict[str, Any]
@@ -136,20 +138,28 @@ class DataDeletionSimulator:
         self, delta: DeletionBlastDelta, circuit_breaker: SteerCircuitBreaker
     ) -> EvaluationResult:
         if delta.confidence < 0.70:
-            return EvaluationResult(
-                decision=GateDecision.ASK,
-                confidence=delta.confidence,
-                reason="Missing live query-planner access; unable to calculate blast radius with confidence.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Missing live query-planner access; unable to calculate blast radius with confidence.",
+                ),
+                delta,
+                self.notary,
             )
 
         if (
             delta.estimated_affected_rows > (self.max_autonomous_delete_rows * 10)
             and delta.is_hard_delete
         ):
-            return EvaluationResult(
-                decision=GateDecision.DENY,
-                confidence=delta.confidence,
-                reason=f"CRITICAL BLAST RADIUS: hard delete would purge ~{delta.estimated_affected_rows:,} rows.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.DENY,
+                    confidence=delta.confidence,
+                    reason=f"CRITICAL BLAST RADIUS: hard delete would purge ~{delta.estimated_affected_rows:,} rows.",
+                ),
+                delta,
+                self.notary,
             )
 
         if delta.estimated_affected_rows > self.max_autonomous_delete_rows or delta.is_hard_delete:
@@ -167,10 +177,20 @@ class DataDeletionSimulator:
                     "mode": "soft_delete",
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return attach_evidence(
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
+                delta,
+                self.notary,
+            )
 
-        return EvaluationResult(
-            decision=GateDecision.ALLOW,
-            confidence=delta.confidence,
-            reason=f"Delete operation is bounded (~{delta.estimated_affected_rows} rows) within safety envelope.",
+        return attach_evidence(
+            EvaluationResult(
+                decision=GateDecision.ALLOW,
+                confidence=delta.confidence,
+                reason=f"Delete operation is bounded (~{delta.estimated_affected_rows} rows) within safety envelope.",
+            ),
+            delta,
+            self.notary,
         )

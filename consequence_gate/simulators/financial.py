@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..core.circuit_breaker import SteerCircuitBreaker
+from ..core.evidence import ConsequenceNotary, attach_evidence
 from ..core.models import EvaluationResult, GateDecision
 
 
@@ -29,6 +30,7 @@ class FinancialDeltaPredictor:
     ):
         self.daily_tier_limit_inr = daily_tier_limit_inr
         self.instant_wire_threshold = instant_wire_threshold
+        self.notary: ConsequenceNotary | None = None
 
     def simulate(
         self, tool_name: str, args: dict[str, Any], context: dict[str, Any]
@@ -76,20 +78,31 @@ class FinancialDeltaPredictor:
         self, delta: FinancialStateDelta, circuit_breaker: SteerCircuitBreaker
     ) -> EvaluationResult:
         if delta.confidence < 0.70:
-            return EvaluationResult(
-                decision=GateDecision.ASK,
-                confidence=delta.confidence,
-                reason="Low simulation confidence: stale ledger or unverified KYC context.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.ASK,
+                    confidence=delta.confidence,
+                    reason="Low simulation confidence: stale ledger or unverified KYC context.",
+                ),
+                delta,
+                self.notary,
             )
 
         if (
             delta.rolling_24h_exposure_inr > (delta.policy_tier_limit_inr * 2.0)
             and delta.irreversibility_score >= 0.9
         ):
-            return EvaluationResult(
-                decision=GateDecision.DENY,
-                confidence=delta.confidence,
-                reason=f"Projected delta INR {delta.projected_net_delta_inr:,.2f} critically breaches velocity envelope.",
+            return attach_evidence(
+                EvaluationResult(
+                    decision=GateDecision.DENY,
+                    confidence=delta.confidence,
+                    reason=(
+                        f"Projected delta INR {delta.projected_net_delta_inr:,.2f} "
+                        "critically breaches velocity envelope."
+                    ),
+                ),
+                delta,
+                self.notary,
             )
 
         if delta.rolling_24h_exposure_inr > delta.policy_tier_limit_inr:
@@ -110,10 +123,20 @@ class FinancialDeltaPredictor:
                     "escrow_amount": delta.projected_net_delta_inr - max_allowed_instant,
                 },
             }
-            return circuit_breaker.resolve(delta.natural_key, delta.confidence, base_steer)
+            return attach_evidence(
+                circuit_breaker.resolve(
+                    delta.natural_key, delta.proposed_args, delta.confidence, base_steer
+                ),
+                delta,
+                self.notary,
+            )
 
-        return EvaluationResult(
-            decision=GateDecision.ALLOW,
-            confidence=delta.confidence,
-            reason="Projected balance delta is within safe autonomous operational boundary.",
+        return attach_evidence(
+            EvaluationResult(
+                decision=GateDecision.ALLOW,
+                confidence=delta.confidence,
+                reason="Projected balance delta is within safe autonomous operational boundary.",
+            ),
+            delta,
+            self.notary,
         )
