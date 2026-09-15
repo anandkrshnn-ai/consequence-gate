@@ -32,6 +32,9 @@ Please report vulnerabilities privately:
 - Idempotency tokens are cryptographically hashed from the transaction's natural key (e.g. `user_id:amount:recipient` or `table:filter_hash`).
 - This prevents replay attacks and ensures that network retry loops cannot duplicate transactions or bypass circuit breakers.
 
+> **Note on Idempotency Caching (Known Limitation)**
+> The current `SteerCircuitBreaker` implementation relies solely on the natural key for tracking attempts, without hashing the full request payload. Because it cannot distinguish between a genuine network replay (identical payload) and an agent stubbornly resubmitting a modified (but still non-compliant) request, **genuine replays are currently counted as new attempts** and will count toward the `max_retries` cap. This will be addressed in a future interface update to `resolve()`.
+
 ---
 
 ## Supported Versions
