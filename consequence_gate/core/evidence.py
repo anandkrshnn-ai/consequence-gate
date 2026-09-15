@@ -167,6 +167,6 @@ def verify_envelope(envelope: ConsequenceEvidenceEnvelope) -> bool:
 def attach_evidence(
     result: EvaluationResult, delta: Any, notary: ConsequenceNotary | None
 ) -> EvaluationResult:
-    signer = notary or ConsequenceNotary.ephemeral()
-    result.evidence = signer.sign_evaluation(delta, result)
+    if notary is not None:
+        result.evidence = notary.sign_evaluation(delta, result)
     return result

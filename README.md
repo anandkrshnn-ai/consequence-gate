@@ -228,7 +228,7 @@ consequence-gate backtest examples/benchmark_traces.jsonl
 *(Note: Evaluated on a synthetically generated trace corpus `examples/benchmark_traces.jsonl` to validate harness mechanics end-to-end; see [BACKTEST_RESULTS.md](BACKTEST_RESULTS.md) for disclosure)*
 
 - **Benign Pass-Through (True Negatives):** 252 (50.4%) — Benign operations passed through.
-- **Downstream Hazards Intercepted:** 129 (25.8%) — Schema-valid hazards caught before execution (100% recall [129/129] on this synthetic corpus).
+- **Downstream Hazards Intercepted:** 129 (25.8%) — Schema-valid hazards caught before execution.
 - **Over-Blocked Operations Relieved:** 35 (7.0%) — Benign calls over-blocked by naive regex gates safely enabled.
 - **Ambiguous Escalations:** 84 (16.8%) — Low-confidence/unrecognized calls routed to `ASK`.
 

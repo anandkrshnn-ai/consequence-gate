@@ -9,7 +9,8 @@ def test_retry_cap_escalates_to_ask():
     r1 = breaker.resolve("txn_1", {}, 0.9, dict(steer))
     assert r1.decision == GateDecision.STEER
 
-    breaker._attempts["steer_txn_1"] = 2
+    breaker.store.increment_attempts("steer_txn_1")
+    breaker.store.increment_attempts("steer_txn_1")
     r2 = breaker.resolve("txn_1", {}, 0.9, dict(steer))
     assert r2.decision in (GateDecision.STEER, GateDecision.ASK)
 

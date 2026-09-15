@@ -26,6 +26,7 @@ def test_allow_within_safe_bounds():
         "recipients": ["user1@example.com"] * 5000,
         "suppress_unsubscribes": True,
         "canary_enabled": False,
+        "campaign_id": "test_camp",
     }
     context = {
         "segment_counts": {"active_users": 5000},
@@ -51,6 +52,7 @@ def test_deny_compliance_violation():
         "recipients": ["user1@example.com"] * 1000,
         "suppress_unsubscribes": False,
         "canary_enabled": False,
+        "campaign_id": "test_camp",
     }
     context = {
         "segment_counts": {"active_users": 1000},
@@ -75,6 +77,7 @@ def test_deny_severe_reputation_risk():
         "recipients": ["+1234567890"] * 50000,
         "suppress_unsubscribes": True,
         "canary_enabled": True,
+        "campaign_id": "test_camp",
     }
     context = {
         "segment_counts": {"all_users": 50000},
@@ -99,6 +102,7 @@ def test_ask_low_confidence():
         "channel": "email",
         "recipients": ["user1@example.com"] * 5000,
         "suppress_unsubscribes": True,
+        "campaign_id": "test_camp",
     }
     context = {}
 
@@ -119,6 +123,7 @@ def test_steer_over_threshold():
         "recipients": ["user1@example.com"] * 50000,
         "suppress_unsubscribes": True,
         "canary_enabled": False,
+        "campaign_id": "test_camp",
     }
     context = {
         "segment_counts": {"active_users": 50000},
@@ -147,6 +152,7 @@ def test_steer_high_bounce_canary():
         "recipients": ["user1@example.com"] * 50000,
         "suppress_unsubscribes": True,
         "canary_enabled": True,
+        "campaign_id": "test_camp",
     }
     context = {
         "segment_counts": {"active_users": 50000},
@@ -166,19 +172,19 @@ def test_irreversibility_scoring():
     """Test irreversibility scoring by channel."""
     sim = OutboundCommunicationSimulator()
 
-    email_args = {"channel": "email", "recipients": ["a@b.com"]}
+    email_args = {"channel": "email", "recipients": ["a@b.com"], "campaign_id": "test_camp"}
     email_delta = sim.simulate("send", email_args, {})
     assert email_delta.irreversibility_score == 1.0
 
-    sms_args = {"channel": "sms", "recipients": ["+123"]}
+    sms_args = {"channel": "sms", "recipients": ["+123"], "campaign_id": "test_camp"}
     sms_delta = sim.simulate("send", sms_args, {})
     assert sms_delta.irreversibility_score == 1.0
 
-    push_args = {"channel": "push_notification", "recipients": ["device_123"]}
+    push_args = {"channel": "push_notification", "recipients": ["device_123"], "campaign_id": "test_camp"}
     push_delta = sim.simulate("send", push_args, {})
     assert push_delta.irreversibility_score == 0.8
 
-    inapp_args = {"channel": "in_app_notification", "recipients": ["user_123"]}
+    inapp_args = {"channel": "in_app_notification", "recipients": ["user_123"], "campaign_id": "test_camp"}
     inapp_delta = sim.simulate("send", inapp_args, {})
     assert inapp_delta.irreversibility_score == 0.3
 
