@@ -24,6 +24,9 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from ..core.evidence import ConsequenceNotary
+from ..core.store import Store
+
 from ..core.circuit_breaker import SteerCircuitBreaker
 from ..core.models import EvaluationResult, GateDecision
 from ..simulators.communications import OutboundCommunicationSimulator
@@ -54,6 +57,8 @@ class MCPConsequenceProxy:
         evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult],
         circuit_breaker: SteerCircuitBreaker | None = None,
         context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        store: Store | None = None,
+        notary: ConsequenceNotary | None = None,
     ):
         """
         Args:
@@ -62,12 +67,16 @@ class MCPConsequenceProxy:
             evaluator_fn: function(delta, circuit_breaker) -> EvaluationResult
             circuit_breaker: SteerCircuitBreaker (default: max_retries=2)
             context_provider: function(request_params) -> context dict
+            store: Optional Store for durable idempotency.
+            notary: Optional ConsequenceNotary for evidence.
         """
         self.downstream_command = downstream_command
         self.simulator_fn = simulator_fn
         self.evaluator_fn = evaluator_fn
-        self.circuit_breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2)
+        self.circuit_breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2, store=store)
         self.context_provider = context_provider or (lambda params: {})
+        self.store = store
+        self.notary = notary
 
         self.downstream_process: subprocess.Popen | None = None
 
@@ -209,6 +218,8 @@ def create_financial_mcp_proxy(
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for financial-disbursement MCP proxy.
@@ -228,7 +239,8 @@ def create_financial_mcp_proxy(
         daily_tier_limit_inr=daily_tier_limit_inr,
         instant_wire_threshold=instant_wire_threshold,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    predictor.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return predictor.evaluate(delta, circuit_breaker)
@@ -239,6 +251,8 @@ def create_financial_mcp_proxy(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
 
 
@@ -248,6 +262,8 @@ def create_database_mcp_proxy(
     db_conn=None,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for database-deletion MCP proxy.
@@ -264,7 +280,8 @@ def create_database_mcp_proxy(
         max_autonomous_delete_rows=max_autonomous_delete_rows,
         db_conn=db_conn,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -275,6 +292,8 @@ def create_database_mcp_proxy(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
 
 
@@ -286,6 +305,8 @@ def create_communications_mcp_proxy(
     canary_max_complaint_rate: float = 0.01,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for communications-blast MCP proxy.
@@ -308,7 +329,8 @@ def create_communications_mcp_proxy(
         canary_max_bounce_rate=canary_max_bounce_rate,
         canary_max_complaint_rate=canary_max_complaint_rate,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -319,4 +341,6 @@ def create_communications_mcp_proxy(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
