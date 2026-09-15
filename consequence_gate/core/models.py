@@ -4,7 +4,7 @@ Core data models shared across all domain simulators.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class GateDecision(str, Enum):
@@ -34,4 +34,4 @@ class EvaluationResult:
     confidence: float
     reason: str
     steer_payload: dict[str, Any] | None = None
-    evidence: Optional[Any] = None
+    evidence: Any | None = None

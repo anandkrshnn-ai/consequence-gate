@@ -26,7 +26,12 @@ def test_financial_allow_emits_signed_envelope():
     predictor = FinancialDeltaPredictor(daily_tier_limit_inr=25000.0)
     predictor.notary = _notary()
     breaker = SteerCircuitBreaker()
-    args = {"amount": 1000, "currency": "INR", "payout_method": "standard_ach", "claim_id": "c-allow"}
+    args = {
+        "amount": 1000,
+        "currency": "INR",
+        "payout_method": "standard_ach",
+        "claim_id": "c-allow",
+    }
     context = {"account_rolling_24h_spend": 0.0, "kyc_verified": True}
     delta = predictor.simulate("process_claim", args, context)
     result = predictor.evaluate(delta, breaker)

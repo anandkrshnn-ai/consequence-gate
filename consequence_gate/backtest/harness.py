@@ -33,14 +33,14 @@ def run_backtest(
 
         if gt == "UNSAFE":
             if new_decision in ("DENY", "STEER", "ASK"):
-                quadrant = "FALSE_NEGATIVE_CAUGHT" # TP: Hazard Intercepted
+                quadrant = "FALSE_NEGATIVE_CAUGHT"  # TP: Hazard Intercepted
             else:
-                quadrant = "OTHER" # FN: Missed Hazard
+                quadrant = "OTHER"  # FN: Missed Hazard
         elif gt == "SAFE":
             if new_decision == "ALLOW":
-                quadrant = "TRUE_NEGATIVE" # TN: Benign Pass-Through
+                quadrant = "TRUE_NEGATIVE"  # TN: Benign Pass-Through
             else:
-                quadrant = "FALSE_POSITIVE" # FP: Over-blocked
+                quadrant = "FALSE_POSITIVE"  # FP: Over-blocked
         else:
             # Fallback for traces lacking ground_truth_consequence
             old_decision = trace.get("existing_gate_decision", "ALLOW")
