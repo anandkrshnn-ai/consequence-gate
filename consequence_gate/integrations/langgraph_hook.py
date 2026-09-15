@@ -22,6 +22,8 @@ except ImportError:
     ToolMessage = None
     ToolCallRequest = None
 
+from ..core.evidence import ConsequenceNotary
+from ..core.store import Store
 from ..core.circuit_breaker import SteerCircuitBreaker
 from ..core.models import EvaluationResult, GateDecision
 from ..simulators.communications import OutboundCommunicationSimulator
@@ -34,6 +36,8 @@ def create_consequence_middleware(
     evaluator_fn: Callable[[Any, SteerCircuitBreaker], EvaluationResult],
     circuit_breaker: SteerCircuitBreaker | None = None,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ):
     """
     Factory for creating a LangGraph middleware that wraps tool calls.
@@ -56,7 +60,7 @@ def create_consequence_middleware(
     """
     from langchain.agents.middleware import wrap_tool_call
 
-    breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2)
+    breaker = circuit_breaker or SteerCircuitBreaker(max_retries=2, store=store)
     context_fn = context_provider or (lambda state: {})
 
     @wrap_tool_call
@@ -135,13 +139,16 @@ def create_financial_gate_middleware(
     instant_wire_threshold: float = 10000.0,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ):
     """Factory for financial gate middleware."""
     predictor = FinancialDeltaPredictor(
         daily_tier_limit_inr=daily_tier_limit_inr,
         instant_wire_threshold=instant_wire_threshold,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    predictor.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return predictor.evaluate(delta, circuit_breaker)
@@ -151,6 +158,8 @@ def create_financial_gate_middleware(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
 
 
@@ -159,13 +168,16 @@ def create_database_gate_middleware(
     db_conn=None,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ):
     """Factory for database gate middleware."""
     simulator = DataDeletionSimulator(
         max_autonomous_delete_rows=max_autonomous_delete_rows,
         db_conn=db_conn,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -175,6 +187,8 @@ def create_database_gate_middleware(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
 
 
@@ -185,6 +199,8 @@ def create_communications_gate_middleware(
     canary_max_complaint_rate: float = 0.01,
     max_retries: int = 2,
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    store: Store | None = None,
+    notary: ConsequenceNotary | None = None,
 ):
     """Factory for communications gate middleware."""
     simulator = OutboundCommunicationSimulator(
@@ -193,7 +209,8 @@ def create_communications_gate_middleware(
         canary_max_bounce_rate=canary_max_bounce_rate,
         canary_max_complaint_rate=canary_max_complaint_rate,
     )
-    breaker = SteerCircuitBreaker(max_retries=max_retries)
+    simulator.notary = notary
+    breaker = SteerCircuitBreaker(max_retries=max_retries, store=store)
 
     def evaluator(delta, circuit_breaker):
         return simulator.evaluate(delta, circuit_breaker)
@@ -203,4 +220,6 @@ def create_communications_gate_middleware(
         evaluator_fn=evaluator,
         circuit_breaker=breaker,
         context_provider=context_provider,
+        store=store,
+        notary=notary,
     )
