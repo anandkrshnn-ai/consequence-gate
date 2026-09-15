@@ -77,16 +77,23 @@ class SQLiteStore:
             return row[0] if row else 0
 
     def increment_attempts(self, key: str) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        """Atomic increment via a single UPSERT statement.
+
+        The previous read-then-write pattern (SELECT, then INSERT or UPDATE)
+        was not atomic: two concurrent callers could both see the key absent
+        and both attempt INSERT, causing a UNIQUE constraint failure. The
+        ON CONFLICT DO UPDATE form is a single SQLite statement and is
+        serialized by SQLite's write lock, so no lost updates or races.
+        """
+        with sqlite3.connect(self.db_path, timeout=30) as conn:
+            conn.execute(
+                "INSERT INTO attempts (key, count) VALUES (?, 1) "
+                "ON CONFLICT(key) DO UPDATE SET count = count + 1",
+                (key,),
+            )
             cursor = conn.execute("SELECT count FROM attempts WHERE key = ?", (key,))
             row = cursor.fetchone()
-            if row:
-                new_count = row[0] + 1
-                conn.execute("UPDATE attempts SET count = ? WHERE key = ?", (new_count, key))
-            else:
-                new_count = 1
-                conn.execute("INSERT INTO attempts (key, count) VALUES (?, ?)", (key, new_count))
-            return new_count
+            return row[0] if row else 0
 
     def get_response(self, key: str) -> EvaluationResult | None:
         with sqlite3.connect(self.db_path) as conn:

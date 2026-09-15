@@ -21,6 +21,7 @@ MCP spec reference:
 import json
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -79,8 +80,7 @@ class MCPConsequenceProxy:
         self.notary = notary
 
         self.downstream_process: subprocess.Popen | None = None
-
-
+        self._downstream_lock = threading.Lock()
 
     def _intercept_tools_call(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -139,8 +139,8 @@ class MCPConsequenceProxy:
 
         return None  # Should not reach here
 
-    def _forward_to_downstream(self, request: dict[str, Any], expect_response: bool = True) -> dict[str, Any] | None:
-        """Forward request to downstream MCP server and return response if expected."""
+    def _ensure_downstream(self) -> subprocess.Popen:
+        """Launch the downstream MCP server subprocess if not already running."""
         if self.downstream_process is None:
             self.downstream_process = subprocess.Popen(
                 self.downstream_command,
@@ -150,18 +150,66 @@ class MCPConsequenceProxy:
                 text=True,
                 bufsize=1,
             )
+        return self.downstream_process
 
-        # Write request to downstream stdin
-        request_line = json.dumps(request) + "\n"
-        self.downstream_process.stdin.write(request_line)
-        self.downstream_process.stdin.flush()
+    def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        """Forward a JSON-RPC message to the downstream MCP server.
 
-        if not expect_response:
-            return None
+        Notification / request split:
+        If the request has no "id" (a JSON-RPC notification, e.g.
+        "initialized" or "cancelled"), it is written to the downstream
+        and no response is read — notifications are fire-and-forget by
+        the JSON-RPC 2.0 spec. If the request has an "id", a response is
+        expected.
 
-        # Read response from downstream stdout
-        response_line = self.downstream_process.stdout.readline()
-        return json.loads(response_line)
+        Response correlation by JSON-RPC id:
+        For requests, the downstream stdout is read line-by-line until a
+        JSON-RPC response whose "id" matches the request's is found.
+        Downstream server notifications (lines with no "id") are
+        skipped — they are not the response to our request. This prevents
+        a server-side log or progress notification from being
+        misinterpreted as the response to a pending request.
+
+        Single-flight lock (known limitation for v0.2):
+        A threading.Lock ensures only one request/response cycle is in
+        flight at a time. Concurrent callers serialize behind the lock.
+        Pipelined requests from a client (two requests before either
+        response) will block, not interleave responses. A full demux
+        thread is deferred until a client actually pipelines.
+
+        Raises:
+            ConnectionError: if the downstream closes stdout before
+            responding to a request.
+        """
+        is_notification = "id" not in request
+
+        with self._downstream_lock:
+            process = self._ensure_downstream()
+
+            request_line = json.dumps(request) + "\n"
+            process.stdin.write(request_line)
+            process.stdin.flush()
+
+            if is_notification:
+                return None
+
+            request_id = request["id"]
+            while True:
+                response_line = process.stdout.readline()
+                if not response_line:
+                    raise ConnectionError(
+                        "Downstream MCP server closed stdout before responding "
+                        f"to request id={request_id!r}"
+                    )
+                response = json.loads(response_line)
+                # Skip notifications from downstream (no id) — not our response.
+                if "id" not in response:
+                    continue
+                if response["id"] == request_id:
+                    return response
+                # A response with a different id: should not occur in
+                # single-flight mode, but skip defensively and keep waiting.
+                continue
 
     def _process_line(self, line: str) -> str | None:
         """Process a single JSON-RPC line from client."""
@@ -173,9 +221,10 @@ class MCPConsequenceProxy:
 
         method = request.get("method")
         if method != "tools/call":
-            # Not a tool call - forward to downstream
-            is_notification = "id" not in request
-            response = self._forward_to_downstream(request, expect_response=not is_notification)
+            # Not a tool call — forward to downstream (initialize handshake,
+            # resources/list, notifications, etc.). _forward_to_downstream
+            # handles the notification vs request split internally.
+            response = self._forward_to_downstream(request)
             return json.dumps(response) if response is not None else None
 
         # Intercept tools/call
