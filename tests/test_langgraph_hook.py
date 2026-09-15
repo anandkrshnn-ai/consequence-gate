@@ -194,3 +194,73 @@ def test_financial_factory_middleware():
     result = middleware.fn(request, mock_handler)
     assert isinstance(result, ToolMessage)
     assert "STEER_GUIDANCE:" in result.content
+
+def test_ask_callback_approved_allows():
+    """If ASK callback returns APPROVED, middleware allows (calls handler)."""
+    from consequence_gate.core.approval import ApprovalDecision
+
+    cb = MagicMock(return_value=ApprovalDecision.APPROVED)
+
+    def simulator_fn(tool_name, args, context):
+        return MagicMock()
+
+    def evaluator_fn(delta, breaker):
+        return EvaluationResult(
+            decision=GateDecision.ASK,
+            confidence=0.40,
+            reason="Low simulation confidence.",
+        )
+
+    middleware = create_consequence_middleware(
+        simulator_fn=simulator_fn,
+        evaluator_fn=evaluator_fn,
+        circuit_breaker=SteerCircuitBreaker(),
+        ask_callback=cb,
+    )
+
+    request = MockToolCallRequest(
+        {
+            "name": "process_claim",
+            "args": {"amount": 100},
+            "id": "cb_call_1",
+        }
+    )
+
+    result = middleware.fn(request, mock_handler)
+    assert result["result"] == "success"
+    cb.assert_called_once()
+
+def test_ask_callback_rejected_raises():
+    """If ASK callback returns REJECTED, middleware raises ValueError."""
+    from consequence_gate.core.approval import ApprovalDecision
+
+    cb = MagicMock(return_value=ApprovalDecision.REJECTED)
+
+    def simulator_fn(tool_name, args, context):
+        return MagicMock()
+
+    def evaluator_fn(delta, breaker):
+        return EvaluationResult(
+            decision=GateDecision.ASK,
+            confidence=0.40,
+            reason="Low simulation confidence.",
+        )
+
+    middleware = create_consequence_middleware(
+        simulator_fn=simulator_fn,
+        evaluator_fn=evaluator_fn,
+        circuit_breaker=SteerCircuitBreaker(),
+        ask_callback=cb,
+    )
+
+    request = MockToolCallRequest(
+        {
+            "name": "process_claim",
+            "args": {"amount": 100},
+            "id": "cb_call_2",
+        }
+    )
+
+    with pytest.raises(ValueError, match="ESCALATION_REQUIRED:"):
+        middleware.fn(request, mock_handler)
+    cb.assert_called_once()

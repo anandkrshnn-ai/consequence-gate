@@ -22,6 +22,7 @@ except ImportError:
     ToolMessage = None
     ToolCallRequest = None
 
+from ..core.approval import ApprovalDecision, AskCallback
 from ..core.evidence import ConsequenceNotary
 from ..core.store import Store
 from ..core.circuit_breaker import SteerCircuitBreaker
@@ -38,6 +39,7 @@ def create_consequence_middleware(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ):
     """
     Factory for creating a LangGraph middleware that wraps tool calls.
@@ -95,6 +97,10 @@ def create_consequence_middleware(
             raise ValueError(f"BLOCKED: {result.reason}")
 
         if result.decision == GateDecision.ASK:
+            if ask_callback is not None:
+                approval = ask_callback(result, result.evidence)
+                if approval == ApprovalDecision.APPROVED:
+                    return handler(request)
             # Human approval required - for now, raise exception with escalation message
             # In production, this would integrate with LangGraph's interrupt() or a human-in-the-loop system
             raise ValueError(f"ESCALATION_REQUIRED: {result.reason}")
@@ -136,6 +142,7 @@ def create_financial_gate_middleware(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ):
     """Factory for financial gate middleware."""
     predictor = FinancialDeltaPredictor(
@@ -155,6 +162,7 @@ def create_financial_gate_middleware(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )
 
 
@@ -165,6 +173,7 @@ def create_database_gate_middleware(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ):
     """Factory for database gate middleware."""
     simulator = DataDeletionSimulator(
@@ -184,6 +193,7 @@ def create_database_gate_middleware(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )
 
 
@@ -196,6 +206,7 @@ def create_communications_gate_middleware(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ):
     """Factory for communications gate middleware."""
     simulator = OutboundCommunicationSimulator(
@@ -217,4 +228,5 @@ def create_communications_gate_middleware(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )

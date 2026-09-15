@@ -19,6 +19,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from ..core.approval import ApprovalDecision, AskCallback
 from ..core.evidence import ConsequenceNotary
 from ..core.store import Store
 
@@ -69,6 +70,7 @@ class ConsequenceGateHook(HookProvider):
         context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
         store: Store | None = None,
         notary: ConsequenceNotary | None = None,
+        ask_callback: AskCallback | None = None,
     ):
         """
         Args:
@@ -87,6 +89,7 @@ class ConsequenceGateHook(HookProvider):
         self.context_provider = context_provider or self._default_context
         self.store = store
         self.notary = notary
+        self.ask_callback = ask_callback
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
         registry.add_callback(BeforeToolCallEvent, self.intercept)
@@ -134,6 +137,10 @@ class ConsequenceGateHook(HookProvider):
             return
 
         if result.decision == GateDecision.ASK:
+            if self.ask_callback is not None:
+                approval = self.ask_callback(result, result.evidence)
+                if approval == ApprovalDecision.APPROVED:
+                    return  # allow
             event.cancel_tool = f"ESCALATION_REQUIRED: {result.reason}"
             return
 
@@ -169,6 +176,7 @@ def create_financial_gate_hook(
     context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a financial-disbursement gate hook.
@@ -200,6 +208,7 @@ def create_financial_gate_hook(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )
 
 
@@ -210,6 +219,7 @@ def create_database_gate_hook(
     context_provider: Callable[[BeforeToolCallEvent], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ) -> ConsequenceGateHook:
     """
     Factory for a database-deletion gate hook.
@@ -241,4 +251,5 @@ def create_database_gate_hook(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )

@@ -321,3 +321,85 @@ def test_downstream_eof_raises_connection_error():
         assert False, "Should have raised ConnectionError"
     except ConnectionError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# ASK Callback Integration
+# ---------------------------------------------------------------------------
+
+from consequence_gate.core.approval import ApprovalDecision
+
+def test_ask_callback_approved_forwards():
+    """If ASK callback returns APPROVED, the request is forwarded."""
+    cb = MagicMock(return_value=ApprovalDecision.APPROVED)
+    proxy = _make_proxy(
+        evaluator_fn=lambda delta, breaker: EvaluationResult(
+            decision=GateDecision.ASK, confidence=0.4, reason="Low confidence"
+        ),
+        ask_callback=cb,
+    )
+    proxy._forward_to_downstream = MagicMock(
+        return_value={"jsonrpc": "2.0", "id": 5, "result": {"content": []}}
+    )
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {"name": "test_tool", "arguments": {}},
+    }
+    result = proxy._process_line(json.dumps(request))
+    response = json.loads(result)
+
+    assert response["id"] == 5
+    cb.assert_called_once()
+    proxy._forward_to_downstream.assert_called_once()
+
+def test_ask_callback_rejected_returns_iserror():
+    """If ASK callback returns REJECTED, returns isError=True."""
+    cb = MagicMock(return_value=ApprovalDecision.REJECTED)
+    proxy = _make_proxy(
+        evaluator_fn=lambda delta, breaker: EvaluationResult(
+            decision=GateDecision.ASK, confidence=0.4, reason="Low confidence"
+        ),
+        ask_callback=cb,
+    )
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {"name": "test_tool", "arguments": {}},
+    }
+    result = proxy._process_line(json.dumps(request))
+    response = json.loads(result)
+
+    assert response["id"] == 6
+    assert response["result"]["isError"] is True
+    assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
+    cb.assert_called_once()
+
+def test_ask_callback_timeout_returns_iserror():
+    """If ASK callback returns TIMEOUT, returns isError=True."""
+    cb = MagicMock(return_value=ApprovalDecision.TIMEOUT)
+    proxy = _make_proxy(
+        evaluator_fn=lambda delta, breaker: EvaluationResult(
+            decision=GateDecision.ASK, confidence=0.4, reason="Low confidence"
+        ),
+        ask_callback=cb,
+    )
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {"name": "test_tool", "arguments": {}},
+    }
+    result = proxy._process_line(json.dumps(request))
+    response = json.loads(result)
+
+    assert response["id"] == 7
+    assert response["result"]["isError"] is True
+    assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
+    cb.assert_called_once()
+

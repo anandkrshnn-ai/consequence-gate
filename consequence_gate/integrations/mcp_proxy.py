@@ -25,6 +25,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+from ..core.approval import ApprovalDecision, AskCallback
 from ..core.evidence import ConsequenceNotary
 from ..core.store import Store
 
@@ -60,6 +61,7 @@ class MCPConsequenceProxy:
         context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         store: Store | None = None,
         notary: ConsequenceNotary | None = None,
+        ask_callback: AskCallback | None = None,
     ):
         """
         Args:
@@ -78,6 +80,7 @@ class MCPConsequenceProxy:
         self.context_provider = context_provider or (lambda params: {})
         self.store = store
         self.notary = notary
+        self.ask_callback = ask_callback
 
         self.downstream_process: subprocess.Popen | None = None
         self._downstream_lock = threading.Lock()
@@ -112,6 +115,13 @@ class MCPConsequenceProxy:
             }
 
         if result.decision in (GateDecision.ASK, GateDecision.STEER):
+            # If ASK and we have a callback, block on human approval
+            if result.decision == GateDecision.ASK and self.ask_callback is not None:
+                approval = self.ask_callback(result, result.evidence)
+                if approval == ApprovalDecision.APPROVED:
+                    return None  # Forward to downstream
+                # Fall through to standard ESCALATION_REQUIRED error on REJECTED or TIMEOUT
+
             # Tool execution error - model can retry with adjusted parameters
             if result.decision == GateDecision.ASK:
                 error_text = f"ESCALATION_REQUIRED: {result.reason}"
@@ -267,6 +277,7 @@ def create_financial_mcp_proxy(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for financial-disbursement MCP proxy.
@@ -300,6 +311,7 @@ def create_financial_mcp_proxy(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )
 
 
@@ -311,6 +323,7 @@ def create_database_mcp_proxy(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for database-deletion MCP proxy.
@@ -341,6 +354,7 @@ def create_database_mcp_proxy(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )
 
 
@@ -354,6 +368,7 @@ def create_communications_mcp_proxy(
     context_provider: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     store: Store | None = None,
     notary: ConsequenceNotary | None = None,
+    ask_callback: AskCallback | None = None,
 ) -> MCPConsequenceProxy:
     """
     Factory for communications-blast MCP proxy.
@@ -390,4 +405,5 @@ def create_communications_mcp_proxy(
         context_provider=context_provider,
         store=store,
         notary=notary,
+        ask_callback=ask_callback,
     )

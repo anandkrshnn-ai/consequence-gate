@@ -261,3 +261,64 @@ def test_retry_cap_escalates_after_max():
     hook.intercept(event)
 
     assert "ESCALATION_REQUIRED:" in event.cancel_tool or "STEER" not in event.cancel_tool
+
+
+def test_ask_callback_approved_allows():
+    """If ASK callback returns APPROVED, hook allows (cancel_tool remains None)."""
+    from consequence_gate.core.approval import ApprovalDecision
+
+    cb = MagicMock(return_value=ApprovalDecision.APPROVED)
+    
+    def simulator_fn(tool_name, args, context):
+        return MagicMock()
+
+    def evaluator_fn(delta, breaker):
+        return EvaluationResult(
+            decision=GateDecision.ASK,
+            confidence=0.40,
+            reason="Low simulation confidence.",
+        )
+
+    hook = ConsequenceGateHook(
+        simulator_fn=simulator_fn,
+        evaluator_fn=evaluator_fn,
+        circuit_breaker=SteerCircuitBreaker(),
+        ask_callback=cb,
+    )
+
+    event = MockBeforeToolCallEvent("process_claim", {"amount": 100, "claim_id": "cb1"})
+    hook.intercept(event)
+
+    assert event.cancel_tool is None
+    cb.assert_called_once()
+
+def test_ask_callback_rejected_cancels():
+    """If ASK callback returns REJECTED, hook cancels with ESCALATION_REQUIRED."""
+    from consequence_gate.core.approval import ApprovalDecision
+
+    cb = MagicMock(return_value=ApprovalDecision.REJECTED)
+    
+    def simulator_fn(tool_name, args, context):
+        return MagicMock()
+
+    def evaluator_fn(delta, breaker):
+        return EvaluationResult(
+            decision=GateDecision.ASK,
+            confidence=0.40,
+            reason="Low simulation confidence.",
+        )
+
+    hook = ConsequenceGateHook(
+        simulator_fn=simulator_fn,
+        evaluator_fn=evaluator_fn,
+        circuit_breaker=SteerCircuitBreaker(),
+        ask_callback=cb,
+    )
+
+    event = MockBeforeToolCallEvent("process_claim", {"amount": 100, "claim_id": "cb2"})
+    hook.intercept(event)
+
+    assert event.cancel_tool is not None
+    assert "ESCALATION_REQUIRED:" in event.cancel_tool
+    cb.assert_called_once()
+
