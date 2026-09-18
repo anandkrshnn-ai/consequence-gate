@@ -13,6 +13,24 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
+    # Real PostgreSQL for the EXPLAIN fixture tests
+    # (tests/test_database_explain_fixture.py). Tests skip gracefully when
+    # the database is unreachable (e.g. local runs without PostgreSQL).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: consequence
+          POSTGRES_PASSWORD: consequence
+          POSTGRES_DB: consequence_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U consequence"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 

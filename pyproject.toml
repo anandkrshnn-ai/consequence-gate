@@ -45,6 +45,7 @@ dev = [
     "pytest-cov>=4.0",
     "black>=23.0",
     "ruff>=0.1.0",
+    "psycopg[binary]>=3.1",
 ]
 mcp = [
     # No additional deps - stdio proxy uses only stdlib

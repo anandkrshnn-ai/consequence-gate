@@ -237,7 +237,7 @@ Detailed breakdown and reproduction steps: [BACKTEST_RESULTS.md](BACKTEST_RESULT
 ## Status & Test Coverage
 
 - **Financial simulator**: functional with unit tests (`tests/test_financial_sim.py`, 96% coverage)
-- **Database simulator**: functional with unit tests (`tests/test_database_sim.py`)
+- **Database simulator**: functional with unit tests (`tests/test_database_sim.py`), plus real-PostgreSQL EXPLAIN fixture validation (`tests/test_database_explain_fixture.py`, runs in CI via a `postgres:16` service container; skips locally when no database is reachable)
 - **Communications simulator**: functional with unit tests (`tests/test_communications_sim.py`, 90% coverage)
 - **Circuit breaker & natural-key idempotency**: functional with unit tests (`tests/test_circuit_breaker.py`, 95% coverage)
 - **Strands integration**: functional with unit tests (`tests/test_strands_hook.py`, 91% coverage)

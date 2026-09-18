@@ -30,7 +30,21 @@ class DeletionBlastDelta:
     irreversibility_score: float
     confidence: float
     natural_key: str
+    proposed_args: dict[str, Any] = field(default_factory=dict)
     simulated_side_effects: list[str] = field(default_factory=list)
+
+
+def _plan_uses_index(node: dict) -> bool:
+    """True if any node in the plan tree (root or descendants) uses an index.
+
+    PostgreSQL commonly plans selective indexed lookups as a "Bitmap Heap
+    Scan" whose child is a "Bitmap Index Scan" -- the root node type alone
+    does not contain "Index". Checking only the root node misses these
+    plans, so the whole tree is walked recursively.
+    """
+    if "Index" in node.get("Node Type", ""):
+        return True
+    return any(_plan_uses_index(child) for child in node.get("Plans", []))
 
 
 def get_planner_row_estimate(db_conn, table: str, filters: dict[str, Any]) -> tuple:
@@ -47,7 +61,7 @@ def get_planner_row_estimate(db_conn, table: str, filters: dict[str, Any]) -> tu
     plan = db_conn.execute(query, params).fetchone()[0]
     root = plan[0]["Plan"]
     estimated_rows = root.get("Plan Rows", 0)
-    used_index = "Index" in root.get("Node Type", "")
+    used_index = _plan_uses_index(root)
     return estimated_rows, used_index
 
 
@@ -138,6 +152,7 @@ class DataDeletionSimulator:
             irreversibility_score=irreversibility,
             confidence=confidence,
             natural_key=natural_key,
+            proposed_args=dict(args),
             simulated_side_effects=side_effects,
         )
 
