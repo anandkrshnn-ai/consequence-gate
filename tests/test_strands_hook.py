@@ -268,7 +268,7 @@ def test_ask_callback_approved_allows():
     from consequence_gate.core.approval import ApprovalDecision
 
     cb = MagicMock(return_value=ApprovalDecision.APPROVED)
-    
+
     def simulator_fn(tool_name, args, context):
         return MagicMock()
 
@@ -292,12 +292,13 @@ def test_ask_callback_approved_allows():
     assert event.cancel_tool is None
     cb.assert_called_once()
 
+
 def test_ask_callback_rejected_cancels():
     """If ASK callback returns REJECTED, hook cancels with ESCALATION_REQUIRED."""
     from consequence_gate.core.approval import ApprovalDecision
 
     cb = MagicMock(return_value=ApprovalDecision.REJECTED)
-    
+
     def simulator_fn(tool_name, args, context):
         return MagicMock()
 
@@ -321,4 +322,3 @@ def test_ask_callback_rejected_cancels():
     assert event.cancel_tool is not None
     assert "ESCALATION_REQUIRED:" in event.cancel_tool
     cb.assert_called_once()
-

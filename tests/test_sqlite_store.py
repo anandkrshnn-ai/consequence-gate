@@ -14,7 +14,7 @@ from consequence_gate.core.store import SQLiteStore
 def db_path():
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
-    os.unlink(path) # let SQLiteStore create it fresh
+    os.unlink(path)  # let SQLiteStore create it fresh
     yield path
     try:
         if os.path.exists(path):
@@ -26,6 +26,7 @@ def db_path():
 # ---------------------------------------------------------------------------
 # Missing / empty keys
 # ---------------------------------------------------------------------------
+
 
 class TestMissingKeys:
     def test_get_attempts_missing_key_returns_zero(self, db_path):
@@ -45,9 +46,7 @@ class TestMissingKeys:
 
     def test_empty_string_key_response(self, db_path):
         store = SQLiteStore(db_path)
-        result = EvaluationResult(
-            decision=GateDecision.ALLOW, confidence=0.9, reason="ok"
-        )
+        result = EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="ok")
         store.set_response("", result)
         fetched = store.get_response("")
         assert fetched is not None
@@ -57,6 +56,7 @@ class TestMissingKeys:
 # ---------------------------------------------------------------------------
 # Attempt round-trip
 # ---------------------------------------------------------------------------
+
 
 class TestAttemptRoundTrip:
     def test_increment_returns_new_count(self, db_path):
@@ -77,6 +77,7 @@ class TestAttemptRoundTrip:
 # ---------------------------------------------------------------------------
 # Response round-trip (all GateDecision values, steer_payload, evidence)
 # ---------------------------------------------------------------------------
+
 
 class TestResponseRoundTrip:
     def test_set_and_get_allow(self, db_path):
@@ -151,14 +152,13 @@ class TestResponseRoundTrip:
 # Persistence across store instances
 # ---------------------------------------------------------------------------
 
+
 class TestPersistence:
     def test_survives_new_instance(self, db_path):
         s1 = SQLiteStore(db_path)
         s1.increment_attempts("persist_key")
         s1.increment_attempts("persist_key")
-        result = EvaluationResult(
-            decision=GateDecision.STEER, confidence=0.9, reason="steer"
-        )
+        result = EvaluationResult(decision=GateDecision.STEER, confidence=0.9, reason="steer")
         s1.set_response("persist_resp", result)
 
         # Simulate process restart: create a new store pointing at the same file
@@ -184,13 +184,13 @@ class TestPersistence:
         # Third resolve should trip the cap
         b3 = SteerCircuitBreaker(max_retries=2, store=store)
         r3 = b3.resolve("shared_txn", {"mod": 3}, 0.9, {"guidance": "a"})
-        from consequence_gate.core.models import GateDecision as GD
-        assert r3.decision == GD.ASK
+        assert r3.decision == GateDecision.ASK
 
 
 # ---------------------------------------------------------------------------
 # Concurrent access
 # ---------------------------------------------------------------------------
+
 
 class TestConcurrency:
     def test_concurrent_increments_are_atomic(self, db_path):

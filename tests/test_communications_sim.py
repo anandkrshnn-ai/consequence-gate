@@ -180,11 +180,19 @@ def test_irreversibility_scoring():
     sms_delta = sim.simulate("send", sms_args, {})
     assert sms_delta.irreversibility_score == 1.0
 
-    push_args = {"channel": "push_notification", "recipients": ["device_123"], "campaign_id": "test_camp"}
+    push_args = {
+        "channel": "push_notification",
+        "recipients": ["device_123"],
+        "campaign_id": "test_camp",
+    }
     push_delta = sim.simulate("send", push_args, {})
     assert push_delta.irreversibility_score == 0.8
 
-    inapp_args = {"channel": "in_app_notification", "recipients": ["user_123"], "campaign_id": "test_camp"}
+    inapp_args = {
+        "channel": "in_app_notification",
+        "recipients": ["user_123"],
+        "campaign_id": "test_camp",
+    }
     inapp_delta = sim.simulate("send", inapp_args, {})
     assert inapp_delta.irreversibility_score == 0.3
 

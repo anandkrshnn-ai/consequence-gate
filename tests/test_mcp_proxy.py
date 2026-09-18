@@ -12,24 +12,27 @@ Tests cover:
 """
 
 import json
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
+from consequence_gate.core.approval import ApprovalDecision
 from consequence_gate.core.models import EvaluationResult, GateDecision
 from consequence_gate.integrations.mcp_proxy import MCPConsequenceProxy, create_financial_mcp_proxy
 
+
 def _make_proxy(**kwargs):
     """Build a proxy with no-op simulator/evaluator for forwarding tests."""
+
     def simulator_fn(tool_name, args, context):
         return MagicMock(confidence=0.9, numeric_deltas={}, irreversibility_score=0.0)
 
     def evaluator_fn(delta, breaker):
         return EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="OK")
 
-    defaults = dict(
-        downstream_command=["echo", "test"],
-        simulator_fn=simulator_fn,
-        evaluator_fn=evaluator_fn,
-    )
+    defaults = {
+        "downstream_command": ["echo", "test"],
+        "simulator_fn": simulator_fn,
+        "evaluator_fn": evaluator_fn,
+    }
     defaults.update(kwargs)
     return MCPConsequenceProxy(**defaults)
 
@@ -37,6 +40,7 @@ def _make_proxy(**kwargs):
 # ---------------------------------------------------------------------------
 # Non-tools/call forwarding
 # ---------------------------------------------------------------------------
+
 
 def test_non_tools_call_request_forwards_and_returns_response():
     """A non-tools/call request (with id) is forwarded and its response returned."""
@@ -62,6 +66,7 @@ def test_notification_forwarded_no_response_expected():
     proxy._forward_to_downstream.assert_called_once_with(notification)
     assert result is None
 
+
 def test_cancelled_notification_forwarded():
     """The 'cancelled' notification (no id) is forwarded, not swallowed."""
     proxy = _make_proxy()
@@ -82,6 +87,7 @@ def test_cancelled_notification_forwarded():
 # tools/call interception
 # ---------------------------------------------------------------------------
 
+
 def test_tools_call_allowed_forwards():
     """tools/call with ALLOW decision forwards to downstream."""
     proxy = _make_proxy()
@@ -100,6 +106,7 @@ def test_tools_call_allowed_forwards():
 
     assert response["id"] == 1
     proxy._forward_to_downstream.assert_called_once()
+
 
 def test_tools_call_denied_returns_error():
     """tools/call with DENY decision returns JSON-RPC error."""
@@ -123,6 +130,7 @@ def test_tools_call_denied_returns_error():
     assert response["error"]["code"] == -32603
     assert "BLOCKED: Critical breach" in response["error"]["message"]
 
+
 def test_tools_call_ask_returns_iserror():
     """tools/call with ASK decision returns tool result with isError=true."""
     proxy = _make_proxy(
@@ -144,11 +152,14 @@ def test_tools_call_ask_returns_iserror():
     assert response["result"]["isError"] is True
     assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
 
+
 def test_tools_call_steer_returns_guidance():
     """tools/call with STEER decision returns structured guidance."""
     proxy = _make_proxy(
         evaluator_fn=lambda delta, breaker: EvaluationResult(
-            decision=GateDecision.STEER, confidence=0.9, reason="Exceeds tier limit",
+            decision=GateDecision.STEER,
+            confidence=0.9,
+            reason="Exceeds tier limit",
             steer_payload={
                 "guidance": "Reduce amount below 25000",
                 "suggested_tool": "test_tool",
@@ -176,6 +187,7 @@ def test_tools_call_steer_returns_guidance():
     assert "[idempotency_key=txn_123_steer]" in error_text
     assert "amount" in error_text
 
+
 def test_financial_factory_proxy():
     """Factory correctly wires up predictor, circuit breaker, and MCP proxy."""
     proxy = create_financial_mcp_proxy(
@@ -196,7 +208,10 @@ def test_financial_factory_proxy():
         "jsonrpc": "2.0",
         "id": 1,
         "method": "tools/call",
-        "params": {"name": "disburse_funds", "arguments": {"amount": 5000, "transaction_ref": "txn_123"}},
+        "params": {
+            "name": "disburse_funds",
+            "arguments": {"amount": 5000, "transaction_ref": "txn_123"},
+        },
     }
     # It will try to forward to downstream_command, we just mock the forwarder here
     proxy._forward_to_downstream = MagicMock(return_value={"jsonrpc": "2.0", "id": 1, "result": {}})
@@ -208,7 +223,10 @@ def test_financial_factory_proxy():
         "jsonrpc": "2.0",
         "id": 2,
         "method": "tools/call",
-        "params": {"name": "disburse_funds", "arguments": {"amount": 50000, "transaction_ref": "txn_456"}},
+        "params": {
+            "name": "disburse_funds",
+            "arguments": {"amount": 50000, "transaction_ref": "txn_456"},
+        },
     }
     result_steer = proxy._process_line(json.dumps(req_steer))
     response = json.loads(result_steer)
@@ -221,6 +239,7 @@ def test_financial_factory_proxy():
 # ---------------------------------------------------------------------------
 # Response correlation by JSON-RPC id
 # ---------------------------------------------------------------------------
+
 
 def test_response_correlation_skips_downstream_notifications():
     """When reading a response, downstream notifications (no id) are skipped
@@ -243,18 +262,37 @@ def test_response_correlation_skips_downstream_notifications():
     class FakeProcess:
         def __init__(self):
             self.stdin = MagicMock()
-            self.stdout = FakeStream([
-                # Downstream emits a notification before the response
-                json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}),
-                # The actual response with matching id
-                json.dumps({"jsonrpc": "2.0", "id": 42, "result": {"content": [{"type": "text", "text": "done"}]}}),
-            ])
+            self.stdout = FakeStream(
+                [
+                    # Downstream emits a notification before the response
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "method": "notifications/progress",
+                            "params": {"progress": 50},
+                        }
+                    ),
+                    # The actual response with matching id
+                    json.dumps(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": 42,
+                            "result": {"content": [{"type": "text", "text": "done"}]},
+                        }
+                    ),
+                ]
+            )
             self.stderr = MagicMock()
 
     proxy = _make_proxy()
     proxy.downstream_process = FakeProcess()
 
-    request = {"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
+    request = {
+        "jsonrpc": "2.0",
+        "id": 42,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
     result = proxy._process_line(json.dumps(request))
     response = json.loads(result)
 
@@ -280,18 +318,25 @@ def test_response_correlation_wrong_id_skipped():
     class FakeProcess:
         def __init__(self):
             self.stdin = MagicMock()
-            self.stdout = FakeStream([
-                # Stale response from a different request
-                json.dumps({"jsonrpc": "2.0", "id": 999, "result": {}}),
-                # Our actual response
-                json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"content": []}}),
-            ])
+            self.stdout = FakeStream(
+                [
+                    # Stale response from a different request
+                    json.dumps({"jsonrpc": "2.0", "id": 999, "result": {}}),
+                    # Our actual response
+                    json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"content": []}}),
+                ]
+            )
             self.stderr = MagicMock()
 
     proxy = _make_proxy()
     proxy.downstream_process = FakeProcess()
 
-    request = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
+    request = {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
     result = proxy._process_line(json.dumps(request))
     response = json.loads(result)
 
@@ -314,11 +359,16 @@ def test_downstream_eof_raises_connection_error():
     proxy = _make_proxy()
     proxy.downstream_process = FakeProcess()
 
-    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
 
     try:
         proxy._process_line(json.dumps(request))
-        assert False, "Should have raised ConnectionError"
+        raise AssertionError("Should have raised ConnectionError")
     except ConnectionError:
         pass
 
@@ -327,7 +377,6 @@ def test_downstream_eof_raises_connection_error():
 # ASK Callback Integration
 # ---------------------------------------------------------------------------
 
-from consequence_gate.core.approval import ApprovalDecision
 
 def test_ask_callback_approved_forwards():
     """If ASK callback returns APPROVED, the request is forwarded."""
@@ -355,6 +404,7 @@ def test_ask_callback_approved_forwards():
     cb.assert_called_once()
     proxy._forward_to_downstream.assert_called_once()
 
+
 def test_ask_callback_rejected_returns_iserror():
     """If ASK callback returns REJECTED, returns isError=True."""
     cb = MagicMock(return_value=ApprovalDecision.REJECTED)
@@ -379,6 +429,7 @@ def test_ask_callback_rejected_returns_iserror():
     assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
     cb.assert_called_once()
 
+
 def test_ask_callback_timeout_returns_iserror():
     """If ASK callback returns TIMEOUT, returns isError=True."""
     cb = MagicMock(return_value=ApprovalDecision.TIMEOUT)
@@ -402,4 +453,3 @@ def test_ask_callback_timeout_returns_iserror():
     assert response["result"]["isError"] is True
     assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
     cb.assert_called_once()
-

@@ -195,6 +195,7 @@ def test_financial_factory_middleware():
     assert isinstance(result, ToolMessage)
     assert "STEER_GUIDANCE:" in result.content
 
+
 def test_ask_callback_approved_allows():
     """If ASK callback returns APPROVED, middleware allows (calls handler)."""
     from consequence_gate.core.approval import ApprovalDecision
@@ -229,6 +230,7 @@ def test_ask_callback_approved_allows():
     result = middleware.fn(request, mock_handler)
     assert result["result"] == "success"
     cb.assert_called_once()
+
 
 def test_ask_callback_rejected_raises():
     """If ASK callback returns REJECTED, middleware raises ValueError."""

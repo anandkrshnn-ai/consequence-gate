@@ -18,7 +18,7 @@ import json
 from typing import Any
 
 from .models import EvaluationResult, GateDecision
-from .store import Store, InMemoryStore
+from .store import InMemoryStore, Store
 
 
 def _normalize_payload(val: Any) -> Any:

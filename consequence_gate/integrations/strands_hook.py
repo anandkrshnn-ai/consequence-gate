@@ -15,7 +15,6 @@ Design contract (from project history):
   confident ALLOW/DENY on unfounded projections.
 """
 
-import json
 from collections.abc import Callable
 from typing import Any
 

@@ -1,11 +1,13 @@
 import json
 import sqlite3
-from typing import Protocol, Any
+from typing import Protocol
+
 from consequence_gate.core.models import EvaluationResult, GateDecision
+
 
 class Store(Protocol):
     """Protocol for durable circuit breaker state."""
-    
+
     def get_attempts(self, key: str) -> int:
         """Get the current attempt count for a natural key."""
         ...
@@ -25,7 +27,7 @@ class Store(Protocol):
 
 class InMemoryStore:
     """Default in-memory state store. Does not survive process restarts."""
-    
+
     def __init__(self):
         self._attempts: dict[str, int] = {}
         self._responses: dict[str, EvaluationResult] = {}
@@ -46,7 +48,7 @@ class InMemoryStore:
 
 class SQLiteStore:
     """Durable state store using SQLite."""
-    
+
     def __init__(self, db_path: str = "consequence_gate_state.db"):
         self.db_path = db_path
         self._init_db()
@@ -98,31 +100,41 @@ class SQLiteStore:
     def get_response(self, key: str) -> EvaluationResult | None:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute(
-                "SELECT decision, confidence, reason, steer_payload, evidence FROM responses WHERE key = ?", 
-                (key,)
+                "SELECT decision, confidence, reason, steer_payload, evidence FROM responses WHERE key = ?",
+                (key,),
             )
             row = cursor.fetchone()
             if not row:
                 return None
-            
+
             decision, confidence, reason, steer_payload_str, evidence_str = row
             steer_payload = json.loads(steer_payload_str) if steer_payload_str else None
             evidence = json.loads(evidence_str) if evidence_str else None
-            
+
             return EvaluationResult(
                 decision=GateDecision(decision),
                 confidence=float(confidence),
                 reason=reason,
                 steer_payload=steer_payload,
-                evidence=evidence
+                evidence=evidence,
             )
 
     def set_response(self, key: str, result: EvaluationResult) -> None:
         with sqlite3.connect(self.db_path) as conn:
             steer_payload_str = json.dumps(result.steer_payload) if result.steer_payload else None
             evidence_str = json.dumps(result.evidence) if result.evidence else None
-            
-            conn.execute("""
+
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO responses (key, decision, confidence, reason, steer_payload, evidence)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (key, result.decision.value, result.confidence, result.reason, steer_payload_str, evidence_str))
+            """,
+                (
+                    key,
+                    result.decision.value,
+                    result.confidence,
+                    result.reason,
+                    steer_payload_str,
+                    evidence_str,
+                ),
+            )

@@ -89,7 +89,7 @@ class OutboundCommunicationSimulator:
 
         campaign_id = args.get("campaign_id")
         segment_id = segment_filter or args.get("segment_id")
-        
+
         if not campaign_id and not segment_id:
             natural_key = ""
         else:

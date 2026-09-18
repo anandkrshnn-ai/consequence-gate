@@ -50,16 +50,17 @@ def test_strict_retry_cap_enforcement():
 
 def test_store_survives_across_breakers():
     from consequence_gate.core.store import InMemoryStore
+
     store = InMemoryStore()
-    
+
     b1 = SteerCircuitBreaker(max_retries=2, store=store)
     b1.resolve("shared_txn", {"mod": 1}, 0.9, {"guidance": "a"})
     assert store.get_attempts("steer_shared_txn") == 1
-    
+
     b2 = SteerCircuitBreaker(max_retries=2, store=store)
     b2.resolve("shared_txn", {"mod": 2}, 0.9, {"guidance": "a"})
     assert store.get_attempts("steer_shared_txn") == 2
-    
+
     # Attempt 3 on new breaker instance should hit cap
     b3 = SteerCircuitBreaker(max_retries=2, store=store)
     r3 = b3.resolve("shared_txn", {"mod": 3}, 0.9, {"guidance": "a"})

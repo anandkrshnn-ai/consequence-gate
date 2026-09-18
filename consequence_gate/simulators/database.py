@@ -90,7 +90,7 @@ class DataDeletionSimulator:
         table = args.get("table", "unknown")
         filters = args.get("filters", {})
         force_hard_delete = args.get("hard_delete", False)
-        
+
         if not table or table == "unknown" or not filters:
             natural_key = ""
         else:

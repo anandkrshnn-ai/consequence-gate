@@ -39,7 +39,9 @@ class FinancialDeltaPredictor:
         amount = float(args.get("amount", 0.0))
         currency = args.get("currency", "INR").upper()
         payout_method = args.get("payout_method", "standard_ach")
-        natural_key = args.get("claim_id") or args.get("transaction_ref") or args.get("idempotency_key") or ""
+        natural_key = (
+            args.get("claim_id") or args.get("transaction_ref") or args.get("idempotency_key") or ""
+        )
 
         conversion_rate = (
             1.0 if currency == "INR" else context.get("exchange_rates", {}).get(currency, 0.0)
@@ -59,7 +61,7 @@ class FinancialDeltaPredictor:
             confidence = 0.80
         else:
             confidence = 0.45
-            
+
         if not natural_key:
             confidence = 0.0
 
