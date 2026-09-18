@@ -32,8 +32,7 @@ Please report vulnerabilities privately:
 - Idempotency tokens are cryptographically hashed from the transaction's natural key (e.g. `user_id:amount:recipient` or `table:filter_hash`).
 - This prevents replay attacks and ensures that network retry loops cannot duplicate transactions or bypass circuit breakers.
 
-> **Note on Idempotency and Steering Caps**
-> The `SteerCircuitBreaker` correctly distinguishes between identical network replays and stubborn agent retries. If an agent resubmits an identical payload (matching `payload_hash`), the circuit breaker returns the cached evaluation without incrementing the attempt counter. If an agent submits a modified payload under the same natural key, the attempt counter increments. Once `max_retries` is breached for a given natural key, the circuit breaker locks into an `ASK` escalation for all subsequent non-identical attempts.
+
 
 ---
 
