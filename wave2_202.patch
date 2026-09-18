@@ -1,0 +1,689 @@
+diff --git a/consequence_gate/core/store.py b/consequence_gate/core/store.py
+index d60a4d2..8f8fe38 100644
+--- a/consequence_gate/core/store.py
++++ b/consequence_gate/core/store.py
+@@ -77,16 +77,23 @@ class SQLiteStore:
+             return row[0] if row else 0
+ 
+     def increment_attempts(self, key: str) -> int:
+-        with sqlite3.connect(self.db_path) as conn:
++        """Atomic increment via a single UPSERT statement.
++
++        The previous read-then-write pattern (SELECT, then INSERT or UPDATE)
++        was not atomic: two concurrent callers could both see the key absent
++        and both attempt INSERT, causing a UNIQUE constraint failure. The
++        ON CONFLICT DO UPDATE form is a single SQLite statement and is
++        serialized by SQLite's write lock, so no lost updates or races.
++        """
++        with sqlite3.connect(self.db_path, timeout=30) as conn:
++            conn.execute(
++                "INSERT INTO attempts (key, count) VALUES (?, 1) "
++                "ON CONFLICT(key) DO UPDATE SET count = count + 1",
++                (key,),
++            )
+             cursor = conn.execute("SELECT count FROM attempts WHERE key = ?", (key,))
+             row = cursor.fetchone()
+-            if row:
+-                new_count = row[0] + 1
+-                conn.execute("UPDATE attempts SET count = ? WHERE key = ?", (new_count, key))
+-            else:
+-                new_count = 1
+-                conn.execute("INSERT INTO attempts (key, count) VALUES (?, ?)", (key, new_count))
+-            return new_count
++            return row[0] if row else 0
+ 
+     def get_response(self, key: str) -> EvaluationResult | None:
+         with sqlite3.connect(self.db_path) as conn:
+diff --git a/consequence_gate/integrations/mcp_proxy.py b/consequence_gate/integrations/mcp_proxy.py
+index a406937..3533899 100644
+--- a/consequence_gate/integrations/mcp_proxy.py
++++ b/consequence_gate/integrations/mcp_proxy.py
+@@ -21,6 +21,7 @@ MCP spec reference:
+ import json
+ import subprocess
+ import sys
++import threading
+ from collections.abc import Callable
+ from typing import Any
+ 
+@@ -79,14 +80,9 @@ class MCPConsequenceProxy:
+         self.notary = notary
+ 
+         self.downstream_process: subprocess.Popen | None = None
++        self._downstream_lock = threading.Lock()
++
+-    def _extract_natural_key(self, tool_name: str, arguments: dict[str, Any]) -> str:
+-        """Extract stable natural key for idempotency."""
+-        return (
+-            arguments.get("claim_id")
+-            or arguments.get("transaction_ref")
+-            or f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+-        )
+ 
+     def _intercept_tools_call(self, request: dict[str, Any]) -> dict[str, Any] | None:
+         """
+@@ -98,7 +94,6 @@ class MCPConsequenceProxy:
+         arguments = params.get("arguments", {})
+ 
+         context = self.context_provider(params)
+-        self._extract_natural_key(tool_name, arguments)
+         delta = self.simulator_fn(tool_name, arguments, context)
+         result = self.evaluator_fn(delta, self.circuit_breaker)
+ 
+@@ -146,8 +141,8 @@ class MCPConsequenceProxy:
+ 
+         return None  # Should not reach here
+ 
+-    def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any]:
+-        """Forward request to downstream MCP server and return response."""
++    def _ensure_downstream(self) -> subprocess.Popen:
++        """Launch the downstream MCP server subprocess if not already running."""
+         if self.downstream_process is None:
+             self.downstream_process = subprocess.Popen(
+                 self.downstream_command,
+@@ -157,15 +152,66 @@ class MCPConsequenceProxy:
+                 text=True,
+                 bufsize=1,
+             )
+-
+-        # Write request to downstream stdin
+-        request_line = json.dumps(request) + "\n"
+-        self.downstream_process.stdin.write(request_line)
+-        self.downstream_process.stdin.flush()
+-
+-        # Read response from downstream stdout
+-        response_line = self.downstream_process.stdout.readline()
+-        return json.loads(response_line)
++        return self.downstream_process
++
++    def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any] | None:
++        """Forward a JSON-RPC message to the downstream MCP server.
++
++        Notification / request split:
++        If the request has no "id" (a JSON-RPC notification, e.g.
++        "initialized" or "cancelled"), it is written to the downstream
++        and no response is read — notifications are fire-and-forget by
++        the JSON-RPC 2.0 spec. If the request has an "id", a response is
++        expected.
++
++        Response correlation by JSON-RPC id:
++        For requests, the downstream stdout is read line-by-line until a
++        JSON-RPC response whose "id" matches the request's is found.
++        Downstream server notifications (lines with no "id") are
++        skipped — they are not the response to our request. This prevents
++        a server-side log or progress notification from being
++        misinterpreted as the response to a pending request.
++
++        Single-flight lock (known limitation for v0.2):
++        A threading.Lock ensures only one request/response cycle is in
++        flight at a time. Concurrent callers serialize behind the lock.
++        Pipelined requests from a client (two requests before either
++        response) will block, not interleave responses. A full demux
++        thread is deferred until a client actually pipelines.
++
++        Raises:
++            ConnectionError: if the downstream closes stdout before
++            responding to a request.
++        """
++        is_notification = "id" not in request
++
++        with self._downstream_lock:
++            process = self._ensure_downstream()
++
++            request_line = json.dumps(request) + "\n"
++            process.stdin.write(request_line)
++            process.stdin.flush()
++
++            if is_notification:
++                return None
++
++            request_id = request["id"]
++            while True:
++                response_line = process.stdout.readline()
++                if not response_line:
++                    raise ConnectionError(
++                        "Downstream MCP server closed stdout before responding "
++                        f"to request id={request_id!r}"
++                    )
++                response = json.loads(response_line)
++                # Skip notifications from downstream (no id) — not our response.
++                if "id" not in response:
++                    continue
++                if response["id"] == request_id:
++                    return response
++                # A response with a different id: should not occur in
++                # single-flight mode, but skip defensively and keep waiting.
++                continue
+ 
+     def _process_line(self, line: str) -> str | None:
+         """Process a single JSON-RPC line from client."""
+@@ -177,8 +223,11 @@ class MCPConsequenceProxy:
+         method = request.get("method")
+ 
+         if method != "tools/call":
+-            # Not a tool call - forward as-is
+-            return None
++            # Not a tool call — forward to downstream (initialize handshake,
++            # resources/list, notifications, etc.). _forward_to_downstream
++            # handles the notification vs request split internally.
++            response = self._forward_to_downstream(request)
++            return json.dumps(response) if response is not None else None
+ 
+         # Intercept tools/call
+         intercepted_response = self._intercept_tools_call(request)
+diff --git a/tests/test_mcp_proxy.py b/tests/test_mcp_proxy.py
+index 86e46a9..882c0a1 100644
+--- a/tests/test_mcp_proxy.py
++++ b/tests/test_mcp_proxy.py
+@@ -1,24 +1,25 @@
+-"""
+-Unit tests for MCPConsequenceProxy.
++"""Unit tests for MCPConsequenceProxy.
+ 
+ Tests cover:
+-- Non-tools/call requests pass through unchanged
++- Non-tools/call requests (with id) are forwarded and response returned
++- Notifications (no id) are forwarded without waiting for a response
+ - tools/call with ALLOW decision forwards to downstream
+ - tools/call with DENY decision returns JSON-RPC error
+ - tools/call with ASK decision returns tool result with isError=true
+ - tools/call with STEER decision returns structured guidance
+ - Idempotency token stability across retries
++- Response correlation by JSON-RPC id (skips downstream notifications)
+ """
+ 
+ import json
+-from unittest.mock import MagicMock
++from unittest.mock import MagicMock, call
+ 
+ from consequence_gate.core.models import EvaluationResult, GateDecision
+ from consequence_gate.integrations.mcp_proxy import MCPConsequenceProxy, create_financial_mcp_proxy
+ 
+-def test_non_tools_call_passes_through():
+-    """Non-tools/call requests should return None (forward as-is)."""
++def _make_proxy(**kwargs):
++    """Build a proxy with no-op simulator/evaluator for forwarding tests."""
+     def simulator_fn(tool_name, args, context):
+         return MagicMock(confidence=0.9, numeric_deltas={}, irreversibility_score=0.0)
+ 
+@@ -26,36 +27,67 @@ def test_non_tools_call_passes_through():
+     def evaluator_fn(delta, breaker):
+         return EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="OK")
+ 
+-    proxy = MCPConsequenceProxy(
++    defaults = dict(
+         downstream_command=["echo", "test"],
+         simulator_fn=simulator_fn,
+         evaluator_fn=evaluator_fn,
+     )
++    defaults.update(kwargs)
++    return MCPConsequenceProxy(**defaults)
++
++
++# ---------------------------------------------------------------------------
++# Non-tools/call forwarding
++# ---------------------------------------------------------------------------
++
++def test_non_tools_call_request_forwards_and_returns_response():
++    """A non-tools/call request (with id) is forwarded and its response returned."""
++    proxy = _make_proxy()
++    expected = {"jsonrpc": "2.0", "id": 1, "result": {}}
++    proxy._forward_to_downstream = MagicMock(return_value=expected)
+ 
+-    # resources/list request (not tools/call)
+     request = {"jsonrpc": "2.0", "id": 1, "method": "resources/list"}
+     result = proxy._process_line(json.dumps(request))
+ 
+-    # Should return None (forward to downstream)
++    proxy._forward_to_downstream.assert_called_once_with(request)
++    assert result == json.dumps(expected)
++
++
++def test_notification_forwarded_no_response_expected():
++    """A JSON-RPC notification (no id) is forwarded and None is returned."""
++    proxy = _make_proxy()
++    proxy._forward_to_downstream = MagicMock(return_value=None)
++
++    notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
++    result = proxy._process_line(json.dumps(notification))
++
++    proxy._forward_to_downstream.assert_called_once_with(notification)
+     assert result is None
+ 
+-def test_tools_call_allowed_forwards():
+-    """tools/call with ALLOW decision forwards to downstream."""
++def test_cancelled_notification_forwarded():
++    """The 'cancelled' notification (no id) is forwarded, not swallowed."""
++    proxy = _make_proxy()
++    proxy._forward_to_downstream = MagicMock(return_value=None)
+ 
+-    def simulator_fn(tool_name, args, context):
+-        return MagicMock(
+-            confidence=0.9, numeric_deltas={"balance": -1000}, irreversibility_score=0.2
+-        )
++    notification = {
++        "jsonrpc": "2.0",
++        "method": "notifications/cancelled",
++        "params": {"requestId": "abc-123"},
++    }
++    result = proxy._process_line(json.dumps(notification))
+ 
+-    def evaluator_fn(delta, breaker):
+-        return EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="Within bounds")
++    proxy._forward_to_downstream.assert_called_once_with(notification)
++    assert result is None
+ 
+-    proxy = MCPConsequenceProxy(
+-        downstream_command=["echo", "test"],
+-        simulator_fn=simulator_fn,
+-        evaluator_fn=evaluator_fn,
+-    )
++
++# ---------------------------------------------------------------------------
++# tools/call interception
++# ---------------------------------------------------------------------------
++
++def test_tools_call_allowed_forwards():
++    """tools/call with ALLOW decision forwards to downstream."""
++    proxy = _make_proxy()
+     proxy._forward_to_downstream = MagicMock(
+         return_value={"jsonrpc": "2.0", "id": 1, "result": {"content": []}}
+     )
+@@ -74,21 +106,10 @@ def test_tools_call_allowed_forwards():
+ 
+ def test_tools_call_denied_returns_error():
+     """tools/call with DENY decision returns JSON-RPC error."""
+-
+-    def simulator_fn(tool_name, args, context):
+-        return MagicMock(
+-            confidence=0.9, numeric_deltas={"balance": -500000}, irreversibility_score=0.95
+-        )
+-
+-    def evaluator_fn(delta, breaker):
+-        return EvaluationResult(
++    proxy = _make_proxy(
++        evaluator_fn=lambda delta, breaker: EvaluationResult(
+             decision=GateDecision.DENY, confidence=0.9, reason="Critical breach"
+         )
+-
+-    proxy = MCPConsequenceProxy(
+-        downstream_command=["echo", "test"],
+-        simulator_fn=simulator_fn,
+-        evaluator_fn=evaluator_fn,
+     )
+ 
+     request = {
+@@ -107,17 +128,10 @@ def test_tools_call_denied_returns_error():
+ 
+ def test_tools_call_ask_returns_iserror():
+     """tools/call with ASK decision returns tool result with isError=true."""
+-
+-    def simulator_fn(tool_name, args, context):
+-        return MagicMock(confidence=0.4, numeric_deltas={}, irreversibility_score=0.0)
+-
+-    def evaluator_fn(delta, breaker):
+-        return EvaluationResult(decision=GateDecision.ASK, confidence=0.4, reason="Low confidence")
+-
+-    proxy = MCPConsequenceProxy(
+-        downstream_command=["echo", "test"],
+-        simulator_fn=simulator_fn,
+-        evaluator_fn=evaluator_fn,
++    proxy = _make_proxy(
++        evaluator_fn=lambda delta, breaker: EvaluationResult(
++            decision=GateDecision.ASK, confidence=0.4, reason="Low confidence"
++        )
+     )
+ 
+     request = {
+@@ -136,14 +150,8 @@ def test_tools_call_ask_returns_iserror():
+ 
+ def test_tools_call_steer_returns_guidance():
+     """tools/call with STEER decision returns structured guidance."""
+-
+-    def simulator_fn(tool_name, args, context):
+-        return MagicMock(
+-            confidence=0.9, numeric_deltas={"balance": -50000}, irreversibility_score=0.8
+-        )
+-
+-    def evaluator_fn(delta, breaker):
+-        return EvaluationResult(
++    proxy = _make_proxy(
++        evaluator_fn=lambda delta, breaker: EvaluationResult(
+             decision=GateDecision.STEER, confidence=0.9, reason="Exceeds tier limit",
+@@ -157,11 +165,6 @@ def test_tools_call_steer_returns_guidance():
+                 },
+             },
+         )
+-
+-    proxy = MCPConsequenceProxy(
+-        downstream_command=["echo", "test"],
+-        simulator_fn=simulator_fn,
+-        evaluator_fn=evaluator_fn,
+     )
+ 
+     request = {
+@@ -187,7 +190,10 @@ def test_financial_factory_proxy():
+         daily_tier_limit_inr=25000.0,
+         instant_wire_threshold=10000.0,
+         max_retries=2,
+-        context_provider=lambda params: {"account_rolling_24h_spend": 0.0, "kyc_verified": True},
++        context_provider=lambda params: {
++            "account_rolling_24h_spend": 0.0,
++            "kyc_verified": True,
++        },
+     )
+ 
+     assert isinstance(proxy, MCPConsequenceProxy)
+@@ -213,3 +219,108 @@ def test_financial_factory_proxy():
+ 
+     assert "result" in response
+     assert response["result"]["isError"] is True
+     assert "STEER_GUIDANCE:" in response["result"]["content"][0]["text"]
++
++
++# ---------------------------------------------------------------------------
++# Response correlation by JSON-RPC id
++# ---------------------------------------------------------------------------
++
++def test_response_correlation_skips_downstream_notifications():
++    """When reading a response, downstream notifications (no id) are skipped
++    until a response with the matching id is found."""
++
++    # Build a fake downstream process that emits a notification line
++    # before the actual response.
++    class FakeStream:
++        def __init__(self, lines):
++            self._lines = list(lines)
++            self._idx = 0
++
++        def readline(self):
++            if self._idx >= len(self._lines):
++                return ""
++            line = self._lines[self._idx]
++            self._idx += 1
++            return line + "\n"
++
++    class FakeProcess:
++        def __init__(self):
++            self.stdin = MagicMock()
++            self.stdout = FakeStream([
++                # Downstream emits a notification before the response
++                json.dumps({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progress": 50}}),
++                # The actual response with matching id
++                json.dumps({"jsonrpc": "2.0", "id": 42, "result": {"content": [{"type": "text", "text": "done"}]}}),
++            ])
++            self.stderr = MagicMock()
++
++    proxy = _make_proxy()
++    proxy.downstream_process = FakeProcess()
++
++    request = {"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
++    result = proxy._process_line(json.dumps(request))
++    response = json.loads(result)
++
++    assert response["id"] == 42
++    assert response["result"]["content"][0]["text"] == "done"
++
++
++def test_response_correlation_wrong_id_skipped():
++    """A response with a different id is skipped, not returned."""
++
++    class FakeStream:
++        def __init__(self, lines):
++            self._lines = list(lines)
++            self._idx = 0
++
++        def readline(self):
++            if self._idx >= len(self._lines):
++                return ""
++            line = self._lines[self._idx]
++            self._idx += 1
++            return line + "\n"
++
++    class FakeProcess:
++        def __init__(self):
++            self.stdin = MagicMock()
++            self.stdout = FakeStream([
++                # Stale response from a different request
++                json.dumps({"jsonrpc": "2.0", "id": 999, "result": {}}),
++                # Our actual response
++                json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"content": []}}),
++            ])
++            self.stderr = MagicMock()
++
++    proxy = _make_proxy()
++    proxy.downstream_process = FakeProcess()
++
++    request = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
++    result = proxy._process_line(json.dumps(request))
++    response = json.loads(result)
++
++    assert response["id"] == 7
++
++
++def test_downstream_eof_raises_connection_error():
++    """If the downstream closes stdout before responding, ConnectionError is raised."""
++
++    class FakeStream:
++        def readline(self):
++            return ""  # EOF
++
++    class FakeProcess:
++        def __init__(self):
++            self.stdin = MagicMock()
++            self.stdout = FakeStream()
++            self.stderr = MagicMock()
++
++    proxy = _make_proxy()
++    proxy.downstream_process = FakeProcess()
++
++    request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "x", "arguments": {}}}
++
++    try:
++        proxy._process_line(json.dumps(request))
++        assert False, "Should have raised ConnectionError"
++    except ConnectionError:
++        pass
+diff --git a/tests/test_sqlite_store.py b/tests/test_sqlite_store.py
+new file mode 100644
+index 0000000..2022fa6
+--- /dev/null
++++ b/tests/test_sqlite_store.py
+@@ -0,0 +1,207 @@
++"""Tests for SQLiteStore: durable circuit-breaker state persistence."""
++
++import os
++import tempfile
++from concurrent.futures import ThreadPoolExecutor
++
++import pytest
++
++from consequence_gate.core.models import EvaluationResult, GateDecision
++from consequence_gate.core.store import SQLiteStore
++
++
++# ---------------------------------------------------------------------------
++# Missing / empty keys
++# ---------------------------------------------------------------------------
++
++class TestMissingKeys:
++    def test_get_attempts_missing_key_returns_zero(self, db_path):
++        store = SQLiteStore(db_path)
++        assert store.get_attempts("nonexistent") == 0
++
++    def test_get_response_missing_key_returns_none(self, db_path):
++        store = SQLiteStore(db_path)
++        assert store.get_response("nonexistent") is None
++
++    def test_empty_string_key_attempts(self, db_path):
++        store = SQLiteStore(db_path)
++        assert store.get_attempts("") == 0
++        count = store.increment_attempts("")
++        assert count == 1
++        assert store.get_attempts("") == 1
++
++    def test_empty_string_key_response(self, db_path):
++        store = SQLiteStore(db_path)
++        result = EvaluationResult(
++            decision=GateDecision.ALLOW, confidence=0.9, reason="ok"
++        )
++        store.set_response("", result)
++        fetched = store.get_response("")
++        assert fetched is not None
++        assert fetched.decision == GateDecision.ALLOW
++
++
++# ---------------------------------------------------------------------------
++# Attempt round-trip
++# ---------------------------------------------------------------------------
++
++class TestAttemptRoundTrip:
++    def test_increment_returns_new_count(self, db_path):
++        store = SQLiteStore(db_path)
++        assert store.increment_attempts("k1") == 1
++        assert store.increment_attempts("k1") == 2
++        assert store.increment_attempts("k1") == 3
++
++    def test_independent_keys(self, db_path):
++        store = SQLiteStore(db_path)
++        store.increment_attempts("alpha")
++        store.increment_attempts("alpha")
++        store.increment_attempts("beta")
++        assert store.get_attempts("alpha") == 2
++        assert store.get_attempts("beta") == 1
++
++
++# ---------------------------------------------------------------------------
++# Response round-trip (all GateDecision values, steer_payload, evidence)
++# ---------------------------------------------------------------------------
++
++class TestResponseRoundTrip:
++    def test_set_and_get_allow(self, db_path):
++        store = SQLiteStore(db_path)
++        result = EvaluationResult(
++            decision=GateDecision.ALLOW, confidence=0.95, reason="within bounds"
++        )
++        store.set_response("key_allow", result)
++        fetched = store.get_response("key_allow")
++        assert fetched is not None
++        assert fetched.decision == GateDecision.ALLOW
++        assert fetched.confidence == pytest.approx(0.95)
++        assert fetched.reason == "within bounds"
++        assert fetched.steer_payload is None
++        assert fetched.evidence is None
++
++    def test_set_and_get_steer_with_payload(self, db_path):
++        store = SQLiteStore(db_path)
++        result = EvaluationResult(
++            decision=GateDecision.STEER,
++            confidence=0.88,
++            reason="velocity breach",
++            steer_payload={
++                "guidance": "reduce amount",
++                "suggested_tool": "staged_payout",
++                "suggested_args": {"amount": 5000},
++            },
++        )
++        store.set_response("key_steer", result)
++        fetched = store.get_response("key_steer")
++        assert fetched is not None
++        assert fetched.decision == GateDecision.STEER
++        assert fetched.steer_payload == {
++            "guidance": "reduce amount",
++            "suggested_tool": "staged_payout",
++            "suggested_args": {"amount": 5000},
++        }
++
++    def test_set_and_get_deny(self, db_path):
++        store = SQLiteStore(db_path)
++        result = EvaluationResult(
++            decision=GateDecision.DENY, confidence=0.97, reason="critical blast"
++        )
++        store.set_response("key_deny", result)
++        fetched = store.get_response("key_deny")
++        assert fetched.decision == GateDecision.DENY
++
++    def test_set_and_get_ask(self, db_path):
++        store = SQLiteStore(db_path)
++        result = EvaluationResult(
++            decision=GateDecision.ASK, confidence=0.42, reason="stale context"
++        )
++        store.set_response("key_ask", result)
++        fetched = store.get_response("key_ask")
++        assert fetched.decision == GateDecision.ASK
++        assert fetched.confidence == pytest.approx(0.42)
++
++    def test_overwrite_response(self, db_path):
++        store = SQLiteStore(db_path)
++        store.set_response(
++            "k", EvaluationResult(decision=GateDecision.ALLOW, confidence=0.9, reason="ok")
++        )
++        store.set_response(
++            "k", EvaluationResult(decision=GateDecision.DENY, confidence=0.99, reason="nope")
++        )
++        fetched = store.get_response("k")
++        assert fetched.decision == GateDecision.DENY
++        assert fetched.reason == "nope"
++
++
++# ---------------------------------------------------------------------------
++# Persistence across store instances
++# ---------------------------------------------------------------------------
++
++class TestPersistence:
++    def test_survives_new_instance(self, db_path):
++        s1 = SQLiteStore(db_path)
++        s1.increment_attempts("persist_key")
++        s1.increment_attempts("persist_key")
++        result = EvaluationResult(
++            decision=GateDecision.STEER, confidence=0.9, reason="steer"
++        )
++        s1.set_response("persist_resp", result)
++
++        # Simulate process restart: create a new store pointing at the same file
++        s2 = SQLiteStore(db_path)
++        assert s2.get_attempts("persist_key") == 2
++        fetched = s2.get_response("persist_resp")
++        assert fetched is not None
++        assert fetched.decision == GateDecision.STEER
++
++    def test_survives_new_circuit_breaker(self, db_path):
++        from consequence_gate.core.circuit_breaker import SteerCircuitBreaker
++
++        store = SQLiteStore(db_path)
++        b1 = SteerCircuitBreaker(max_retries=2, store=store)
++        b1.resolve("shared_txn", {"mod": 1}, 0.9, {"guidance": "a"})
++        assert store.get_attempts("steer_shared_txn") == 1
++
++        # New breaker, same store — state carries over
++        b2 = SteerCircuitBreaker(max_retries=2, store=store)
++        b2.resolve("shared_txn", {"mod": 2}, 0.9, {"guidance": "a"})
++        assert store.get_attempts("steer_shared_txn") == 2
++
++        # Third resolve should trip the cap
++        b3 = SteerCircuitBreaker(max_retries=2, store=store)
++        r3 = b3.resolve("shared_txn", {"mod": 3}, 0.9, {"guidance": "a"})
++        from consequence_gate.core.models import GateDecision as GD
++        assert r3.decision == GD.ASK
++
++
++# ---------------------------------------------------------------------------
++# Concurrent access
++# ---------------------------------------------------------------------------
++
++class TestConcurrency:
++    def test_concurrent_increments_are_atomic(self, db_path):
++        """SQLite's default busy-timeout serializes writes; every increment
++        must be accounted for with no lost updates."""
++        store = SQLiteStore(db_path)
++        n_threads = 10
++        n_per_thread = 50
++
++        def worker(_):
++            for _ in range(n_per_thread):
++                store.increment_attempts("concurrent_key")
++
++        with ThreadPoolExecutor(max_workers=n_threads) as pool:
++            list(pool.map(worker, range(n_threads)))
++
++        assert store.get_attempts("concurrent_key") == n_threads * n_per_thread
