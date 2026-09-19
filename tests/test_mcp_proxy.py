@@ -244,48 +244,30 @@ def test_financial_factory_proxy():
 def test_response_correlation_skips_downstream_notifications():
     """When reading a response, downstream notifications (no id) are skipped
     until a response with the matching id is found."""
-
-    # Build a fake downstream process that emits a notification line
-    # before the actual response.
-    class FakeStream:
-        def __init__(self, lines):
-            self._lines = list(lines)
-            self._idx = 0
-
-        def readline(self):
-            if self._idx >= len(self._lines):
-                return ""
-            line = self._lines[self._idx]
-            self._idx += 1
-            return line + "\n"
-
-    class FakeProcess:
-        def __init__(self):
-            self.stdin = MagicMock()
-            self.stdout = FakeStream(
-                [
-                    # Downstream emits a notification before the response
-                    json.dumps(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "notifications/progress",
-                            "params": {"progress": 50},
-                        }
-                    ),
-                    # The actual response with matching id
-                    json.dumps(
-                        {
-                            "jsonrpc": "2.0",
-                            "id": 42,
-                            "result": {"content": [{"type": "text", "text": "done"}]},
-                        }
-                    ),
-                ]
-            )
-            self.stderr = MagicMock()
+    import queue
 
     proxy = _make_proxy()
-    proxy.downstream_process = FakeProcess()
+    proxy.downstream_process = MagicMock()
+    proxy._stdout_queue = queue.Queue()
+
+    proxy._stdout_queue.put(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/progress",
+                "params": {"progress": 50},
+            }
+        )
+    )
+    proxy._stdout_queue.put(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 42,
+                "result": {"content": [{"type": "text", "text": "done"}]},
+            }
+        )
+    )
 
     request = {
         "jsonrpc": "2.0",
@@ -302,34 +284,13 @@ def test_response_correlation_skips_downstream_notifications():
 
 def test_response_correlation_wrong_id_skipped():
     """A response with a different id is skipped, not returned."""
-
-    class FakeStream:
-        def __init__(self, lines):
-            self._lines = list(lines)
-            self._idx = 0
-
-        def readline(self):
-            if self._idx >= len(self._lines):
-                return ""
-            line = self._lines[self._idx]
-            self._idx += 1
-            return line + "\n"
-
-    class FakeProcess:
-        def __init__(self):
-            self.stdin = MagicMock()
-            self.stdout = FakeStream(
-                [
-                    # Stale response from a different request
-                    json.dumps({"jsonrpc": "2.0", "id": 999, "result": {}}),
-                    # Our actual response
-                    json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"content": []}}),
-                ]
-            )
-            self.stderr = MagicMock()
+    import queue
 
     proxy = _make_proxy()
-    proxy.downstream_process = FakeProcess()
+    proxy.downstream_process = MagicMock()
+    proxy._stdout_queue = queue.Queue()
+    proxy._stdout_queue.put(json.dumps({"jsonrpc": "2.0", "id": 999, "result": {}}))
+    proxy._stdout_queue.put(json.dumps({"jsonrpc": "2.0", "id": 7, "result": {"content": []}}))
 
     request = {
         "jsonrpc": "2.0",
@@ -343,21 +304,14 @@ def test_response_correlation_wrong_id_skipped():
     assert response["id"] == 7
 
 
-def test_downstream_eof_raises_connection_error():
-    """If the downstream closes stdout before responding, ConnectionError is raised."""
-
-    class FakeStream:
-        def readline(self):
-            return ""  # EOF
-
-    class FakeProcess:
-        def __init__(self):
-            self.stdin = MagicMock()
-            self.stdout = FakeStream()
-            self.stderr = MagicMock()
+def test_downstream_eof_returns_error():
+    """If the downstream closes stdout before responding, returns a JSON-RPC error."""
+    import queue
 
     proxy = _make_proxy()
-    proxy.downstream_process = FakeProcess()
+    proxy.downstream_process = MagicMock()
+    proxy._stdout_queue = queue.Queue()
+    proxy._stdout_queue.put(None)  # EOF
 
     request = {
         "jsonrpc": "2.0",
@@ -366,11 +320,11 @@ def test_downstream_eof_raises_connection_error():
         "params": {"name": "x", "arguments": {}},
     }
 
-    try:
-        proxy._process_line(json.dumps(request))
-        raise AssertionError("Should have raised ConnectionError")
-    except ConnectionError:
-        pass
+    result = proxy._process_line(json.dumps(request))
+    response = json.loads(result)
+    assert response["id"] == 1
+    assert response["error"]["code"] == -32000
+    assert "process is dead" in response["error"]["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -453,3 +407,99 @@ def test_ask_callback_timeout_returns_iserror():
     assert response["result"]["isError"] is True
     assert "ESCALATION_REQUIRED: Low confidence" in response["result"]["content"][0]["text"]
     cb.assert_called_once()
+
+
+def test_downstream_process_death_fails_fast():
+    """If the downstream process dies, the next request should fail fast rather than timing out."""
+    import sys
+    import threading
+
+    proxy = _make_proxy(
+        # A process that stays alive until we kill it
+        downstream_command=[sys.executable, "-c", "import time; time.sleep(10)"],
+        downstream_timeout=2.0,
+    )
+
+    # 1. First request starts the process
+    request1 = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
+
+    result_container = {}
+
+    def run_req1():
+        try:
+            res = proxy._process_line(json.dumps(request1))
+            result_container["req1"] = res
+        except Exception as e:
+            result_container["req1_error"] = e
+
+    t1 = threading.Thread(target=run_req1)
+    t1.start()
+
+    # Give it a moment to ensure downstream is spawned
+    import time
+
+    time.sleep(0.5)
+
+    # Kill the downstream process!
+    proxy.downstream_process.terminate()
+    proxy.downstream_process.wait()
+
+    t1.join(timeout=3.0)
+
+    # The first request should get a -32000 error, NOT crash
+    assert "req1_error" not in result_container, (
+        f"Unexpected error: {result_container.get('req1_error')}"
+    )
+    res1 = json.loads(result_container["req1"])
+    assert res1["error"]["code"] == -32000
+    assert "process is dead" in res1["error"]["message"]
+
+    # 2. Second request should hit the fast-fail _downstream_dead logic
+    request2 = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
+
+    start_time = time.time()
+    result2 = proxy._process_line(json.dumps(request2))
+    elapsed = time.time() - start_time
+
+    # It should fail fast (well under the 2.0s timeout)
+    assert elapsed < 0.5
+
+    response2 = json.loads(result2)
+    assert response2["error"]["code"] == -32000
+    assert "process is dead" in response2["error"]["message"]
+
+
+def test_downstream_write_broken_pipe():
+    """If process.stdin.write raises BrokenPipeError, it returns a -32000 error without crashing."""
+    proxy = _make_proxy()
+    proxy._downstream_dead = False
+    
+    mock_process = MagicMock()
+    mock_process.stdin.write.side_effect = BrokenPipeError("Broken pipe")
+    proxy._ensure_downstream = MagicMock(return_value=mock_process)
+
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "x", "arguments": {}},
+    }
+    
+    result = proxy._process_line(json.dumps(request))
+    assert result is not None
+    response = json.loads(result)
+    
+    assert response["id"] == 1
+    assert response["error"]["code"] == -32000
+    assert "process is dead" in response["error"]["message"]
+    assert proxy._downstream_dead is True

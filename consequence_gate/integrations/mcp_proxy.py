@@ -19,9 +19,11 @@ MCP spec reference:
 """
 
 import json
+import queue
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -61,6 +63,7 @@ class MCPConsequenceProxy:
         store: Store | None = None,
         notary: ConsequenceNotary | None = None,
         ask_callback: AskCallback | None = None,
+        downstream_timeout: float = 60.0,
     ):
         """
         Args:
@@ -80,9 +83,21 @@ class MCPConsequenceProxy:
         self.store = store
         self.notary = notary
         self.ask_callback = ask_callback
+        self.downstream_timeout = downstream_timeout
 
         self.downstream_process: subprocess.Popen | None = None
         self._downstream_lock = threading.Lock()
+        self._stdout_queue: queue.Queue | None = None
+        self._stdout_thread: threading.Thread | None = None
+        self._downstream_dead: bool = False
+
+    def _create_error_response(self, request_id: Any, code: int, message: str) -> dict[str, Any]:
+        """Helper to construct a JSON-RPC error response."""
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": code, "message": message},
+        }
 
     def _intercept_tools_call(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """
@@ -159,6 +174,24 @@ class MCPConsequenceProxy:
                 text=True,
                 bufsize=1,
             )
+            self._stdout_queue = queue.Queue()
+
+            def _enqueue_output(out, q):
+                try:
+                    for line in iter(out.readline, ""):
+                        q.put(line)
+                except Exception:
+                    pass  # Process death or read error; handled by sentinel
+                finally:
+                    q.put(None)  # EOF sentinel
+                    self._downstream_dead = True
+
+            self._stdout_thread = threading.Thread(
+                target=_enqueue_output,
+                args=(self.downstream_process.stdout, self._stdout_queue),
+                daemon=True,
+            )
+            self._stdout_thread.start()
         return self.downstream_process
 
     def _forward_to_downstream(self, request: dict[str, Any]) -> dict[str, Any] | None:
@@ -186,30 +219,52 @@ class MCPConsequenceProxy:
         response) will block, not interleave responses. A full demux
         thread is deferred until a client actually pipelines.
 
-        Raises:
-            ConnectionError: if the downstream closes stdout before
-            responding to a request.
+        Returns:
+            JSON-RPC error response if the downstream process dies or fails,
+            or None for notifications.
         """
         is_notification = "id" not in request
 
         with self._downstream_lock:
-            process = self._ensure_downstream()
+            if self._downstream_dead:
+                if is_notification:
+                    return None
+                return self._create_error_response(request["id"], -32000, "Downstream MCP server process is dead")
 
+            process = self._ensure_downstream()
             request_line = json.dumps(request) + "\n"
-            process.stdin.write(request_line)
-            process.stdin.flush()
+            
+            try:
+                process.stdin.write(request_line)
+                process.stdin.flush()
+            except (ConnectionError, BrokenPipeError):
+                self._downstream_dead = True
+                if is_notification:
+                    return None
+                return self._create_error_response(request["id"], -32000, "Downstream MCP server process is dead")
 
             if is_notification:
                 return None
 
             request_id = request["id"]
+            deadline = time.time() + self.downstream_timeout
+
             while True:
-                response_line = process.stdout.readline()
-                if not response_line:
-                    raise ConnectionError(
-                        "Downstream MCP server closed stdout before responding "
-                        f"to request id={request_id!r}"
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return self._create_error_response(
+                        request_id, -32000, f"Downstream MCP server timed out after {self.downstream_timeout}s waiting for response"
                     )
+
+                try:
+                    response_line = self._stdout_queue.get(timeout=remaining)
+                except queue.Empty:
+                    return self._create_error_response(
+                        request_id, -32000, f"Downstream MCP server timed out after {self.downstream_timeout}s waiting for response"
+                    )
+
+                if response_line is None:
+                    return self._create_error_response(request_id, -32000, "Downstream MCP server process is dead")
                 response = json.loads(response_line)
                 # Skip notifications from downstream (no id) — not our response.
                 if "id" not in response:

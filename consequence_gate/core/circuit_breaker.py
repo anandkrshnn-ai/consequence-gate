@@ -25,8 +25,10 @@ def _normalize_payload(val: Any) -> Any:
     """Normalizes payload structures to ensure consistent hashing."""
     if isinstance(val, dict):
         return {str(k): _normalize_payload(v) for k, v in val.items()}
-    elif isinstance(val, (list, tuple, set)):
+    elif isinstance(val, (list, tuple)):
         return [_normalize_payload(v) for v in val]
+    elif isinstance(val, (set, frozenset)):
+        return sorted([_normalize_payload(v) for v in val], key=str)
     elif isinstance(val, float):
         # Round floats to prevent precision mismatch from causing distinct hashes
         return round(val, 4)
